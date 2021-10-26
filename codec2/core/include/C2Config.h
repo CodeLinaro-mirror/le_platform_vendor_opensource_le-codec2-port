@@ -75,6 +75,10 @@ struct C2Config {
     enum tiling_mode_t : uint32_t;          ///< tiling modes
 };
 
+struct C2PlatformConfig {
+    enum encoding_quality_level_t : uint32_t; ///< encoding quality level
+};
+
 namespace {
 
 enum C2ParamIndexKind : C2Param::type_index_t {
@@ -151,6 +155,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
 
     /* protected content */
     kParamIndexSecureMode,
+    kParamIndexEncryptedBuffer, // info-buffer, used with SM_READ_PROTECTED_WITH_ENCRYPTED
 
     // deprecated
     kParamIndexDelayRequest = kParamIndexDelay | C2Param::CoreIndex::IS_REQUEST_FLAG,
@@ -185,6 +190,8 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexPictureTypeMask,
     kParamIndexPictureType,
     kParamIndexHdr10PlusMetadata,
+
+    kParamIndexPictureQuantization,
 
     /* ------------------------------------ video components ------------------------------------ */
 
@@ -221,6 +228,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexDrcEffectType, // drc, enum
     kParamIndexDrcOutputLoudness, // drc, float (dBFS)
     kParamIndexDrcAlbumMode, // drc, enum
+    kParamIndexAudioFrameSize, // int
 
     /* ============================== platform-defined parameters ============================== */
 
@@ -249,6 +257,17 @@ enum C2ParamIndexKind : C2Param::type_index_t {
 
     // low latency mode
     kParamIndexLowLatencyMode, // bool
+
+    // tunneled codec
+    kParamIndexTunneledMode, // struct
+    kParamIndexTunnelHandle, // int32[]
+    kParamIndexTunnelSystemTime, // int64
+
+    // dmabuf allocator
+    kParamIndexStoreDmaBufUsage,  // store, struct
+
+    // encoding quality requirements
+    kParamIndexEncodingQualityLevel, // encoders, enum
 };
 
 }
@@ -1137,6 +1156,8 @@ constexpr char C2_PARAMKEY_PRIORITY[] = "algo.priority";
 C2ENUM(C2Config::secure_mode_t, uint32_t,
     SM_UNPROTECTED,    ///< no content protection
     SM_READ_PROTECTED, ///< input and output buffers shall be protected from reading
+    /// both read protected and readable encrypted buffers are used
+    SM_READ_PROTECTED_WITH_ENCRYPTED,
 )
 
 typedef C2GlobalParam<C2Tuning, C2SimpleValueStruct<C2Config::secure_mode_t>, kParamIndexSecureMode>
@@ -1688,6 +1709,31 @@ typedef C2StreamParam<C2Tuning, C2SimpleArrayStruct<C2GopLayerStruct>, kParamInd
 constexpr char C2_PARAMKEY_GOP[] = "coding.gop";
 
 /**
+ * Quantization
+ * min/max for each picture type
+ *
+ */
+struct C2PictureQuantizationStruct {
+    C2PictureQuantizationStruct() : type_((C2Config::picture_type_t)0),
+                                         min(INT32_MIN), max(INT32_MAX) {}
+    C2PictureQuantizationStruct(C2Config::picture_type_t type, int32_t min_, int32_t max_)
+        : type_(type), min(min_), max(max_) { }
+
+    C2Config::picture_type_t type_;
+    int32_t min;      // INT32_MIN == 'no lower bound specified'
+    int32_t max;      // INT32_MAX == 'no upper bound specified'
+
+    DEFINE_AND_DESCRIBE_C2STRUCT(PictureQuantization)
+    C2FIELD(type_, "type")
+    C2FIELD(min, "min")
+    C2FIELD(max, "max")
+};
+
+typedef C2StreamParam<C2Tuning, C2SimpleArrayStruct<C2PictureQuantizationStruct>,
+        kParamIndexPictureQuantization> C2StreamPictureQuantizationTuning;
+constexpr char C2_PARAMKEY_PICTURE_QUANTIZATION[] = "coding.qp";
+
+/**
  * Sync frame can be requested on demand by the client.
  *
  * If true, the next I frame shall be encoded as a sync frame. This config can be passed
@@ -1863,7 +1909,9 @@ constexpr char C2_PARAMKEY_MAX_CODED_CHANNEL_COUNT[] = "coded.max-channel-count"
 C2ENUM(C2Config::pcm_encoding_t, uint32_t,
     PCM_16,
     PCM_8,
-    PCM_FLOAT
+    PCM_FLOAT,
+    PCM_24,
+    PCM_32
 )
 
 typedef C2StreamParam<C2Info, C2SimpleValueStruct<C2Config::pcm_encoding_t>, kParamIndexPcmEncoding>
@@ -2034,6 +2082,33 @@ struct C2StoreIonUsageStruct {
 // store, private
 typedef C2GlobalParam<C2Info, C2StoreIonUsageStruct, kParamIndexStoreIonUsage>
         C2StoreIonUsageInfo;
+
+/**
+ * This structure describes the preferred DMA-Buf allocation parameters for a given memory usage.
+ */
+struct C2StoreDmaBufUsageStruct {
+    inline C2StoreDmaBufUsageStruct() { memset(this, 0, sizeof(*this)); }
+
+    inline C2StoreDmaBufUsageStruct(size_t flexCount, uint64_t usage_, uint32_t capacity_)
+        : usage(usage_), capacity(capacity_), allocFlags(0) {
+        memset(heapName, 0, flexCount);
+    }
+
+    uint64_t usage;                         ///< C2MemoryUsage
+    uint32_t capacity;                      ///< capacity
+    int32_t allocFlags;                     ///< ion allocation flags
+    char heapName[];                        ///< dmabuf heap name
+
+    DEFINE_AND_DESCRIBE_FLEX_C2STRUCT(StoreDmaBufUsage, heapName)
+    C2FIELD(usage, "usage")
+    C2FIELD(capacity, "capacity")
+    C2FIELD(allocFlags, "alloc-flags")
+    C2FIELD(heapName, "heap-name")
+};
+
+// store, private
+typedef C2GlobalParam<C2Info, C2StoreDmaBufUsageStruct, kParamIndexStoreDmaBufUsage>
+        C2StoreDmaBufUsageInfo;
 
 /**
  * Flexible pixel format descriptors
