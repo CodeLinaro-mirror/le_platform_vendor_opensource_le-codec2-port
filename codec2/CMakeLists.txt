@@ -14,6 +14,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-error=deprecated-declarations
 	-I/usr/include/drm \
 	-I/usr/include/c++/ \
 	-I/usr/include/c++/${TARGET_SYS} \
+	-I${CMAKE_INCLUDE_PATH} \
 	-I${LIBION_INCLUDE_DIRS} ")
 
 
