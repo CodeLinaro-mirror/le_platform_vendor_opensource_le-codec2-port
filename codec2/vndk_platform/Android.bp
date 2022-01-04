@@ -1,0 +1,36 @@
+cc_library_headers {
+    name: "libcodec2_headers_platform_la",
+    vendor: true,
+    export_include_dirs: ["include"],
+}
+
+cc_library {
+    name: "libcodec2_vndk_platform_la",
+    vendor: true,
+
+    srcs: [
+        "C2AllocatorGBM.cpp",
+    ],
+
+    export_include_dirs: [
+        "include",
+    ],
+
+    header_libs: [
+        "libcodec2_headers_la",
+        "display_intf_headers",
+        "libcodec2_internal_la",
+    ],
+
+    shared_libs: [
+        "libcutils",
+        "libutils",
+        "libbase",
+        "liblog",
+    ],
+
+    cflags: [
+        "-Werror",
+        "-Wall",
+    ],
+}

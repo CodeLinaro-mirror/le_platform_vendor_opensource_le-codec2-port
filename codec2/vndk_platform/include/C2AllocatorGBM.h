@@ -90,6 +90,8 @@ public:
     virtual c2_status_t priorGraphicAllocation(const C2Handle *handle,
             std::shared_ptr<C2GraphicAllocation> *allocation) override;
 
+    virtual bool checkHandle(const C2Handle* const o) const override { return true; }
+
     C2AllocatorGBM(id_t id);
 
     virtual c2_status_t status() const { return mInit; }

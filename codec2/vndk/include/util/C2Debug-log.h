@@ -19,12 +19,29 @@
 
 // Platform specific debug utilities
 #ifdef __ANDROID__
-#include <android-C2Debug-log.h>
-#else
-// TODO: implement base debug utils
-#endif
+#include <android-base/logging.h>
+#include <utils/Log.h>
+#include <android-base/stringprintf.h>
+using android::base::StringPrintf;
 
-#ifdef C2PORT
+#define C2_LOG(LEVEL) \
+        (::android::base::LEVEL != ::android::base::VERBOSE) && LOG(::android::base::LEVEL)
+#define C2_CHECK CHECK
+#define C2_CHECK_LT CHECK_LT
+#define C2_CHECK_LE CHECK_LE
+#define C2_CHECK_EQ CHECK_EQ
+#define C2_CHECK_GE CHECK_GE
+#define C2_CHECK_GT CHECK_GT
+#define C2_CHECK_NE CHECK_NE
+
+#define C2_DCHECK DCHECK
+#define C2_DCHECK_LT DCHECK_LT
+#define C2_DCHECK_LE DCHECK_LE
+#define C2_DCHECK_EQ DCHECK_EQ
+#define C2_DCHECK_GE DCHECK_GE
+#define C2_DCHECK_GT DCHECK_GT
+#define C2_DCHECK_NE DCHECK_NE
+#else
 #include <linux-C2Debug-log.h>
 #endif
 

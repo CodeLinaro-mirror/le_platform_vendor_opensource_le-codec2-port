@@ -1,0 +1,63 @@
+cc_library_headers {
+    name: "libcodec2_internal_la",
+
+    export_include_dirs: [
+        "internal",
+        "include",
+    ],
+
+    vendor: true,
+}
+
+// !!!DO NOT DEPEND ON THIS SHARED LIBRARY DIRECTLY!!!
+cc_library {
+    name: "libcodec2_vndk_la",
+    vendor: true,
+    double_loadable: true,
+
+    srcs: [
+        "C2Buffer.cpp",
+        "C2Config.cpp",
+        "C2DmaBufAllocator.cpp",
+        "C2Store.cpp",
+        "util/C2Debug.cpp",
+        "util/C2InterfaceHelper.cpp",
+        "util/C2InterfaceUtils.cpp",
+        "util/C2ParamUtils.cpp",
+    ],
+
+    export_include_dirs: [
+        "include",
+    ],
+
+    local_include_dirs: [
+        "internal",
+    ],
+
+    header_libs: [
+        "libcodec2_headers_la",
+        "libcodec2_headers_platform_la",
+        "libcodec2_internal_la",
+        "display_intf_headers",
+    ],
+
+    shared_libs: [
+        "libcutils",
+        "libdmabufheap",
+        "libcodec2_vndk_platform_la",
+        "libbase",
+        "libutils",
+        "liblog"
+    ],
+
+    cflags: [
+        "-Werror",
+        "-Wall",
+    ],
+
+    export_header_lib_headers: [
+        "libcodec2_headers_la",
+        "libcodec2_headers_platform_la",
+        "libcodec2_internal_la",
+    ],
+}

@@ -18,8 +18,6 @@
 #include <C2ParamInternal.h>
 #include <util/C2InterfaceHelper.h>
 
-#include <util/C2Debug-log.h>
-
 /* --------------------------------- ReflectorHelper --------------------------------- */
 
 void C2ReflectorHelper::addStructDescriptors(
@@ -520,12 +518,12 @@ private:
 namespace {
 
 static std::string asString(C2Param *p) {
-    char addr[20];
-    snprintf(addr, 20, "%p:[", p);
+    char addr[20] = {0};
+    snprintf(addr, sizeof(addr), "%p:[", p);
     std::string v = addr;
     for (size_t i = 0; i < p->size(); ++i) {
-        char d[4];
-        snprintf(d, 4, " %02x", *(((uint8_t *)p) + i));
+        char d[4] = {0};
+        snprintf(d, sizeof(d), " %02x", *(((uint8_t *)p) + i));
         v += d + (i == 0);
     }
     return v + "]";
@@ -643,6 +641,7 @@ c2_status_t C2InterfaceHelper::config(
                     lateReadParams.emplace_back(p);
                     std::unique_ptr<C2Param> request(C2Param::CopyAsRequest(*p));
                     p = request.get();
+                    paramIx = p->index();
                     paramRequests.emplace_back(std::move(request));
                 }
             }

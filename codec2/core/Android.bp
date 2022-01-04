@@ -1,0 +1,5 @@
+cc_library_headers {
+    name: "libcodec2_headers_la",
+    vendor: true,
+    export_include_dirs: ["include"],
+}

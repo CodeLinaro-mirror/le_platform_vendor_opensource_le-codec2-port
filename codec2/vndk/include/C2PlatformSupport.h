@@ -36,43 +36,25 @@ std::shared_ptr<C2AllocatorStore> GetCodec2PlatformAllocatorStore();
 class C2PlatformAllocatorStore : public C2AllocatorStore {
 public:
     enum : id_t {
-        /**
-         * ID of the ion backed platform allocator.
+        /*
+         * ID of the DMA-Buf Heap (ion replacement) backed platform allocator.
          *
          * C2Handle consists of:
-         *   fd  shared ion buffer handle
+         *   fd  shared dmabuf buffer handle
          *   int size (lo 32 bits)
          *   int size (hi 32 bits)
          *   int magic '\xc2io\x00'
          */
-        ION = PLATFORM_START,
+        DMABUFHEAP = PLATFORM_START,
 
         /**
-         * ID of the gralloc backed platform allocator.
+         * ID of the gbm backed platform allocator.
          *
-         * C2Handle layout is not public. Use C2AllocatorGralloc::UnwrapNativeCodec2GrallocHandle
-         * to get the underlying gralloc handle from a C2Handle, and WrapNativeCodec2GrallocHandle
-         * to create a C2Handle from a gralloc handle - for C2Allocator::priorAllocation.
+         * C2Handle layout is not public. Use C2AllocatorGBM::UnwrapNativeCodec2GrallocHandle
+         * to get the underlying gmb handle from a C2Handle, and WrapNativeCodec2GbmHandle
+         * to create a C2Handle from a gbm handle - for C2Allocator::priorAllocation.
          */
-        GRALLOC,
-
-        /**
-         * ID of the bufferqueue backed platform allocator.
-         *
-         * C2Handle layout is not public. Use C2AllocatorGralloc::UnwrapNativeCodec2GrallocHandle
-         * to get the underlying handle from a C2Handle, and WrapNativeCodec2GrallocHandle
-         * to create a C2Handle from a handle - for C2Allocator::priorAllocation.
-         */
-        BUFFERQUEUE,
-
-        /**
-         * ID of the gralloc backed platform allocator for linear blob buffer.
-         *
-         * C2Handle layout is not public. Use C2AllocatorGralloc::UnwrapNativeCodec2GrallocHandle
-         * to get the underlying gralloc handle from a C2Handle, and WrapNativeCodec2GrallocHandle
-         * to create a C2Handle from a gralloc handle - for C2Allocator::priorAllocation.
-         */
-        BLOB,
+        GBMBUFHEAP,
 
         /**
          * ID of indicating the end of platform allocator definition.
@@ -127,10 +109,36 @@ c2_status_t CreateCodec2BlockPool(
         std::shared_ptr<C2BlockPool> *pool);
 
 /**
+ * Creates a block pool.
+ * \param allocatorId  the allocator ID which is used to allocate blocks
+ * \param components    the components using the block pool
+ * \param pool          pointer to where the created block pool shall be store on success.
+ *                      nullptr will be stored here on failure
+ *
+ * \retval C2_OK        the operation was successful
+ * \retval C2_BAD_VALUE the component is null
+ * \retval C2_NOT_FOUND if the allocator does not exist
+ * \retval C2_NO_MEMORY not enough memory to create a block pool
+ */
+c2_status_t CreateCodec2BlockPool(
+        C2PlatformAllocatorStore::id_t allocatorId,
+        const std::vector<std::shared_ptr<const C2Component>> &components,
+        std::shared_ptr<C2BlockPool> *pool);
+
+/**
  * Returns the platform component store.
  * \retval nullptr if the platform component store could not be obtained
  */
 std::shared_ptr<C2ComponentStore> GetCodec2PlatformComponentStore();
+
+/**
+ * Returns the platform component store.
+ * NOTE: For testing only
+ * \retval nullptr if the platform component store could not be obtained
+ */
+std::shared_ptr<C2ComponentStore> GetTestComponentStore(
+        std::vector<std::tuple<C2String, C2ComponentFactory::CreateCodec2FactoryFunc,
+        C2ComponentFactory::DestroyCodec2FactoryFunc>>);
 
 /**
  * Sets the preferred component store in this process for the sole purpose of accessing its
@@ -139,21 +147,6 @@ std::shared_ptr<C2ComponentStore> GetCodec2PlatformComponentStore();
  * component store is used.
  */
 void SetPreferredCodec2ComponentStore(std::shared_ptr<C2ComponentStore> store);
-
-/**
- * Returns the pool mask.
- * \retval the default pool mask should be adopted if it could not be obtained from property
- *         "debug.stagefright.c2-poolmask"
- */
-int GetCodec2PoolMask();
-
-/**
- * Returns the preferred linear buffer allocator id from param poolMask.
- * C2PlatformAllocatorStore::ION should be chosen as fallback allocator if BLOB is not enabled from
- * param poolMask.
- */
-C2PlatformAllocatorStore::id_t GetPreferredLinearAllocatorId(int poolMask);
-
 } // namespace android
 
 #endif // STAGEFRIGHT_CODEC2_PLATFORM_SUPPORT_H_

@@ -24,19 +24,7 @@
 #include <memory>
 #include <vector>
 
-#ifdef __ANDROID__
-#include <android-C2Buffer.h>
-#else
-#ifdef C2PORT
 #include <linux-C2Buffer.h>
-#else
-typedef void* C2Handle;
-#endif
-
-#endif
-
-/// \defgroup buffer Buffers
-/// @{
 
 /// \defgroup buffer_sync Synchronization
 /// @{
@@ -134,66 +122,6 @@ private:
     friend struct _C2FenceFactory;
 };
 
-/**
- * Event object used by components and the framework.
- *
- * Implements the signaling of an event, analogous to a 'promise'.
- *
- * Hardware backed events do not go through this object, and must be exposed directly as fences
- * by vendors.
- */
-class C2Event {
-public:
-    /**
-     * Returns a fence for this event.
-     */
-    C2Fence fence() const;
-
-    /**
-     * Signals (all) associated fence(s).
-     * This has no effect no effect if the event was already signaled or abandoned.
-     *
-     * \retval C2_OK            the fence(s) were successfully signaled
-     * \retval C2_BAD_STATE     the fence(s) have already been abandoned or merged (caller error)
-     * \retval C2_DUPLICATE     the fence(s) have already been signaled (caller error)
-     * \retval C2_REFUSED       no permission to signal the fence (unexpected - system)
-     * \retval C2_CORRUPTED     some unknown error prevented signaling the fence(s) (unexpected)
-     */
-    c2_status_t fire();
-
-    /**
-     * Trigger this event from the merging of the supplied fences. This means that it will be
-     * abandoned if any of these fences have been abandoned, and it will be fired if all of these
-     * fences have been signaled.
-     *
-     * \retval C2_OK            the merging was successfully done
-     * \retval C2_NO_MEMORY     not enough memory to perform the merging
-     * \retval C2_DUPLICATE     the fence have already been merged (caller error)
-     * \retval C2_BAD_STATE     the fence have already been signaled or abandoned (caller error)
-     * \retval C2_REFUSED       no permission to merge the fence (unexpected - system)
-     * \retval C2_CORRUPTED     some unknown error prevented merging the fence(s) (unexpected)
-     */
-    c2_status_t merge(std::vector<C2Fence> fences);
-
-    /**
-     * Abandons the event and any associated fence(s).
-     * \note Call this to explicitly abandon an event before it is destructed to avoid a warning.
-     *
-     * This has no effect no effect if the event was already signaled or abandoned.
-     *
-     * \retval C2_OK            the fence(s) were successfully signaled
-     * \retval C2_BAD_STATE     the fence(s) have already been signaled or merged (caller error)
-     * \retval C2_DUPLICATE     the fence(s) have already been abandoned (caller error)
-     * \retval C2_REFUSED       no permission to abandon the fence (unexpected - system)
-     * \retval C2_CORRUPTED     some unknown error prevented signaling the fence(s) (unexpected)
-     */
-    c2_status_t abandon();
-
-private:
-    class Impl;
-    std::shared_ptr<Impl> mImpl;
-};
-
 /// \addtogroup buf_internal Internal
 /// @{
 
@@ -237,8 +165,6 @@ private:
     c2_status_t mInitialError;
     T mT; // TODO: move instead of copy
 };
-
-/// @}
 
 /// \defgroup linear Linear Data Blocks
 /// @{
@@ -645,7 +571,8 @@ public:
      * \retval C2_REFUSED   no permission to complete the allocation
      * \retval C2_BAD_VALUE capacity or usage are not supported (invalid) (caller error)
      * \retval C2_OMITTED   this allocator does not support 1D allocations
-     * \retval C2_CORRUPTED some unknown, unrecoverable error occured during allocation (unexpected)
+     * \retval C2_CORRUPTED some unknown, unrecoverable error occurred during allocation
+     *                      (unexpected)
      */
     virtual c2_status_t newLinearAllocation(
             uint32_t capacity __unused, C2MemoryUsage usage __unused,
@@ -669,7 +596,8 @@ public:
      * \retval C2_REFUSED   no permission to recreate the allocation
      * \retval C2_BAD_VALUE invalid handle (caller error)
      * \retval C2_OMITTED   this allocator does not support 1D allocations
-     * \retval C2_CORRUPTED some unknown, unrecoverable error occured during allocation (unexpected)
+     * \retval C2_CORRUPTED some unknown, unrecoverable error occurred during allocation
+     *                      (unexpected)
      */
     virtual c2_status_t priorLinearAllocation(
             const C2Handle *handle __unused,
@@ -702,7 +630,8 @@ public:
      * \retval C2_REFUSED   no permission to complete the allocation
      * \retval C2_BAD_VALUE width, height, format or usage are not supported (invalid) (caller error)
      * \retval C2_OMITTED   this allocator does not support 2D allocations
-     * \retval C2_CORRUPTED some unknown, unrecoverable error occured during allocation (unexpected)
+     * \retval C2_CORRUPTED some unknown, unrecoverable error occurred during allocation
+     *                      (unexpected)
      */
     virtual c2_status_t newGraphicAllocation(
             uint32_t width __unused, uint32_t height __unused, uint32_t format __unused,
@@ -727,7 +656,8 @@ public:
      * \retval C2_REFUSED   no permission to recreate the allocation
      * \retval C2_BAD_VALUE invalid handle (caller error)
      * \retval C2_OMITTED   this allocator does not support 2D allocations
-     * \retval C2_CORRUPTED some unknown, unrecoverable error occured during recreation (unexpected)
+     * \retval C2_CORRUPTED some unknown, unrecoverable error occurred during recreation
+     *                      (unexpected)
      */
     virtual c2_status_t priorGraphicAllocation(
             const C2Handle *handle __unused,
@@ -737,6 +667,22 @@ public:
     }
 
     virtual ~C2Allocator() = default;
+
+    /**
+     * Returns a true if the handle looks valid for this allocator.
+     *
+     * It does not actually validate that the handle represents a valid allocation (by this
+     * allocator), only that the handle could have been returned by this allocator. As such,
+     * multiple allocators may return true for looksValid for the same handle.
+     *
+     * This method MUST be "non-blocking", MUST not access kernel and/or device drivers, and
+     * return within 1us.
+     *
+     * \param handle      the handle for an existing allocation (possibly from another
+     *                    allocator)
+     */
+    virtual bool checkHandle(const C2Handle *const handle) const = 0;
+
 protected:
     C2Allocator() = default;
 };
@@ -881,6 +827,12 @@ public:
      * Obtains a linear writeable block of given |capacity| and |usage|. If successful, the
      * block is stored in |block|. Otherwise, |block| is set to 'nullptr'.
      *
+     * \note The returned buffer may have a larger capacity than requested. In this case the
+     * larger (returned) capacity may be fully used.
+     *
+     * \note There is no guarantee on the alignedness of the returned block. The only guarantee is
+     * that its capacity is equal to or larger than the requested capacity.
+     *
      * \param capacity the size of requested block.
      * \param usage    the memory usage info for the requested block. Returned blocks will be
      *                 optimized for this usage, but may be used with any usage. One exception:
@@ -895,7 +847,8 @@ public:
      * \retval C2_REFUSED   no permission to complete any required allocation
      * \retval C2_BAD_VALUE capacity or usage are not supported (invalid) (caller error)
      * \retval C2_OMITTED   this pool does not support linear blocks
-     * \retval C2_CORRUPTED some unknown, unrecoverable error occured during operation (unexpected)
+     * \retval C2_CORRUPTED some unknown, unrecoverable error occurred during operation
+     *                      (unexpected)
      */
     virtual c2_status_t fetchLinearBlock(
             uint32_t capacity __unused, C2MemoryUsage usage __unused,
@@ -907,6 +860,12 @@ public:
     /**
      * Obtains a circular writeable block of given |capacity| and |usage|. If successful, the
      * block is stored in |block|. Otherwise, |block| is set to 'nullptr'.
+     *
+     * \note The returned buffer may have a larger capacity than requested. In this case the
+     * larger (returned) capacity may be fully used.
+     *
+     * \note There is no guarantee on the alignedness of the returned block. The only guarantee is
+     * that its capacity is equal to or larger than the requested capacity.
      *
      * \param capacity the size of requested circular block. (note: the size of the obtained
      *                 block could be slightly larger, e.g. to accommodate any system-required
@@ -924,7 +883,8 @@ public:
      * \retval C2_REFUSED   no permission to complete any required allocation
      * \retval C2_BAD_VALUE capacity or usage are not supported (invalid) (caller error)
      * \retval C2_OMITTED   this pool does not support circular blocks
-     * \retval C2_CORRUPTED some unknown, unrecoverable error occured during operation (unexpected)
+     * \retval C2_CORRUPTED some unknown, unrecoverable error occurred during operation
+     *                      (unexpected)
      */
     virtual c2_status_t fetchCircularBlock(
             uint32_t capacity __unused, C2MemoryUsage usage __unused,
@@ -936,6 +896,12 @@ public:
     /**
      * Obtains a 2D graphic block of given |width|, |height|, |format| and |usage|. If successful,
      * the block is stored in |block|. Otherwise, |block| is set to 'nullptr'.
+     *
+     * \note The returned buffer may have a larger capacity (width and height) than requested. In
+     * this case the larger (returned) capacity may be fully used.
+     *
+     * \note There is no guarantee on the alignedness of the returned block. The only guarantee is
+     * that its capacity is equal to or larger than the requested capacity (width and height).
      *
      * \param width  the width of requested block (the obtained block could be slightly larger, e.g.
      *               to accommodate any system-required alignment)
@@ -956,7 +922,8 @@ public:
      * \retval C2_BAD_VALUE width, height, format or usage are not supported (invalid) (caller
      *                      error)
      * \retval C2_OMITTED   this pool does not support 2D blocks
-     * \retval C2_CORRUPTED some unknown, unrecoverable error occured during operation (unexpected)
+     * \retval C2_CORRUPTED some unknown, unrecoverable error occurred during operation
+     *                      (unexpected)
      */
     virtual c2_status_t fetchGraphicBlock(
             uint32_t width __unused, uint32_t height __unused, uint32_t format __unused,
@@ -967,6 +934,7 @@ public:
     }
 
     virtual ~C2BlockPool() = default;
+
 protected:
     C2BlockPool() = default;
 };
@@ -1211,75 +1179,6 @@ private:
     size_t mFree __unused;       // end of free section
 };
 
-class _C2CircularBlockSegment : public _C2LinearCapacityAspect {
-public:
-    /**
-     * Returns the available size for this segment.
-     *
-     * \return currently available size for this segment
-     */
-    size_t available() const;
-
-    /**
-     * Reserve some space for this segment from its current start.
-     *
-     * \param size    desired space in bytes
-     * \param fence   a pointer to an acquire fence. If non-null, the reservation is asynchronous and
-     *              a fence will be stored here that will be signaled when the reservation is
-     *              complete. If null, the reservation is synchronous.
-     *
-     * \retval C2_OK            the space was successfully reserved
-     * \retval C2_NO_MEMORY     the space requested cannot be reserved
-     * \retval C2_TIMED_OUT     the reservation timed out \todo when?
-     * \retval C2_CORRUPTED     some unknown error prevented reserving space. (unexpected)
-     */
-    c2_status_t reserve(size_t size, C2Fence *fence /* nullable */);
-
-    /**
-     * Abandons a portion of this segment. This will move to the beginning of this segment.
-     *
-     * \note This methods is only allowed if this segment is producing blocks.
-     *
-     * \param size    number of bytes to abandon
-     *
-     * \retval C2_OK            the data was successfully abandoned
-     * \retval C2_TIMED_OUT     the operation timed out (unexpected)
-     * \retval C2_CORRUPTED     some unknown error prevented abandoning the data (unexpected)
-     */
-    c2_status_t abandon(size_t size);
-
-    /**
-     * Share a portion as block(s) with consumers (these are moved to the used section).
-     *
-     * \note This methods is only allowed if this segment is producing blocks.
-     * \note Share does not move the beginning of the segment. (\todo add abandon/offset?)
-     *
-     * \param size    number of bytes to share
-     * \param fence   fence to be used for the section
-     * \param blocks  vector where the blocks of the section are appended to
-     *
-     * \retval C2_OK            the portion was successfully shared
-     * \retval C2_NO_MEMORY     not enough memory to share the portion
-     * \retval C2_TIMED_OUT     the operation timed out (unexpected)
-     * \retval C2_CORRUPTED     some unknown error prevented sharing the data (unexpected)
-     */
-    c2_status_t share(size_t size, C2Fence fence, std::vector<C2ConstLinearBlock> &blocks);
-
-    /**
-     * Returns the beginning offset of this segment from the start of this circular block.
-     *
-     * @return beginning offset
-     */
-    size_t begin();
-
-    /**
-     * Returns the end offset of this segment from the start of this circular block.
-     *
-     * @return end offset
-     */
-    size_t end();
-};
-
 /**
  * A circular write-view is a dynamic mapped view for a segment of a circular block. Care must be
  * taken when using this view so that only the section owned by the segment is modified.
@@ -1298,34 +1197,6 @@ public:
      * \return error during the creation/mapping of this view.
      */
     c2_status_t error() const;
-};
-
-/**
- * The writer of a circular buffer.
- *
- * Can commit data to a reader (not supported for components) OR share data blocks directly with a
- * consumer.
- *
- * If a component supports outputting data into circular buffers, it must allocate a circular
- * block and use a circular writer.
- */
-class C2CircularWriter : public _C2CircularBlockSegment {
-public:
-    /**
-     * Commits a portion of this segment to the next segment. This moves the beginning of the
-     * segment.
-     *
-     * \param size    number of bytes to commit to the next segment
-     * \param fence   fence used for the commit (the fence must signal before the data is committed)
-     */
-    c2_status_t commit(size_t size, C2Fence fence);
-
-    /**
-     * Maps this block into memory and returns a write view for it.
-     *
-     * \return a write view for this block.
-     */
-    C2Acquirable<C2CircularWriteView> map();
 };
 
 /// @}
@@ -2159,9 +2030,12 @@ private:
 };
 
 /**
- * An extension of C2Info objects that can contain arbitrary buffer data.
+ * A const metadata object that can contain arbitrary buffer data.
  *
- * \note This object is not describable and contains opaque data.
+ * This object is not an actual C2Info and is not attached to buffers (C2Buffer), but rather to
+ * frames (C2FrameData). It is not describable via C2ParamDescriptor.
+ *
+ * C2InfoBuffer is a const object that can be allocated on stack and is copiable.
  */
 class C2InfoBuffer {
 public:
@@ -2170,14 +2044,65 @@ public:
      *
      * \return the parameter index.
      */
-    const C2Param::Index index() const;
+    const C2Param::Index index() const { return mIndex; }
 
     /**
      * Gets the buffer's data.
      *
      * \return the buffer's data.
      */
-    const C2BufferData data() const;
+    const C2BufferData data() const { return mData; }
+
+    /// Returns a clone of this as a global info buffer.
+    C2InfoBuffer asGlobal() const {
+        C2Param::Index index = mIndex;
+        index.convertToGlobal();
+        return C2InfoBuffer(index, mData);
+    }
+
+    /// Returns a clone of this as a port info buffer.
+    C2InfoBuffer asPort(bool output) const {
+        C2Param::Index index = mIndex;
+        index.convertToPort(output);
+        return C2InfoBuffer(index, mData);
+    }
+
+    /// Returns a clone of this as a stream info buffer.
+    C2InfoBuffer asStream(bool output, unsigned stream) const {
+        C2Param::Index index = mIndex;
+        index.convertToStream(output, stream);
+        return C2InfoBuffer(index, mData);
+    }
+
+    /**
+     * Creates a global info buffer containing a single linear block.
+     *
+     * \param index the core parameter index of this info buffer.
+     * \param block the content of the info buffer.
+     *
+     * \return shared pointer to the created info buffer.
+     */
+    static C2InfoBuffer CreateLinearBuffer(C2Param::CoreIndex index, const C2ConstLinearBlock &block);
+
+    /**
+     * Creates a global info buffer containing a single graphic block.
+     *
+     * \param index the core parameter index of this info buffer.
+     * \param block the content of the info buffer.
+     *
+     * \return shared pointer to the created info buffer.
+     */
+    static C2InfoBuffer CreateGraphicBuffer(C2Param::CoreIndex index, const C2ConstGraphicBlock &block);
+
+protected:
+    // no public constructor
+    explicit C2InfoBuffer(C2Param::Index index, const std::vector<C2ConstLinearBlock> &blocks);
+    explicit C2InfoBuffer(C2Param::Index index, const std::vector<C2ConstGraphicBlock> &blocks);
+
+private:
+    C2Param::Index mIndex;
+    C2BufferData mData;
+    explicit C2InfoBuffer(C2Param::Index index, const C2BufferData &data);
 };
 
 /// @}

@@ -14,13 +14,19 @@
  * limitations under the License.
  */
 
+//#define LOG_NDEBUG 0
+#define LOG_TAG "C2Buffer"
+#include <C2Debug.h>
+
 #include <list>
 #include <map>
 #include <mutex>
 
+#include <C2BufferPriv.h>
 #include <C2BlockInternal.h>
 #include <C2PlatformSupport.h>
 
+namespace {
 
 // This anonymous namespace contains the helper classes that allow our implementation to create
 // block/buffer objects.
@@ -43,6 +49,7 @@ class ConstLinearBlockBuddy : public C2ConstLinearBlock {
 
 class LinearBlockBuddy : public C2LinearBlock {
     using C2LinearBlock::C2LinearBlock;
+    friend class ::C2BasicLinearBlockPool;
 };
 
 class AcquirableReadViewBuddy : public C2Acquirable<C2ReadView> {
@@ -78,12 +85,16 @@ class ConstGraphicBlockBuddy : public C2ConstGraphicBlock {
 
 class GraphicBlockBuddy : public C2GraphicBlock {
     using C2GraphicBlock::C2GraphicBlock;
+    friend class ::C2BasicGraphicBlockPool;
 };
 
 class BufferDataBuddy : public C2BufferData {
     using C2BufferData::C2BufferData;
     friend class ::C2Buffer;
+    friend class ::C2InfoBuffer;
 };
+
+}  // namespace
 
 /* ========================================== 1D BLOCK ========================================= */
 
@@ -96,21 +107,13 @@ class BufferDataBuddy : public C2BufferData {
 class C2_HIDE _C2Block1DImpl : public _C2LinearRangeAspect {
 public:
     _C2Block1DImpl(const std::shared_ptr<C2LinearAllocation> &alloc,
-            const std::shared_ptr<_C2BlockPoolData> &poolData = nullptr,
             size_t offset = 0, size_t size = ~(size_t)0)
         : _C2LinearRangeAspect(alloc.get(), offset, size),
-          mAllocation(alloc),
-          mPoolData(poolData) { }
+          mAllocation(alloc) { }
 
     _C2Block1DImpl(const _C2Block1DImpl &other, size_t offset = 0, size_t size = ~(size_t)0)
         : _C2LinearRangeAspect(&other, offset, size),
-          mAllocation(other.mAllocation),
-          mPoolData(other.mPoolData) { }
-
-    /** returns pool data  */
-    std::shared_ptr<_C2BlockPoolData> poolData() const {
-        return mPoolData;
-    }
+          mAllocation(other.mAllocation) { }
 
     /** returns native handle */
     const C2Handle *handle() const {
@@ -129,7 +132,6 @@ public:
 
 private:
     std::shared_ptr<C2LinearAllocation> mAllocation;
-    std::shared_ptr<_C2BlockPoolData> mPoolData;
 };
 
 /**
@@ -272,7 +274,6 @@ C2ConstLinearBlock C2ConstLinearBlock::subBlock(size_t offset_, size_t size_) co
     return C2ConstLinearBlock(mImpl, subRange, mFence);
 }
 
-
 /**
  * Linear block implementation.
  */
@@ -302,6 +303,34 @@ C2ConstLinearBlock C2LinearBlock::share(size_t offset_, size_t size_, C2Fence fe
     return ConstLinearBlockBuddy(mImpl, C2LinearRange(*this, offset_, size_), fence);
 }
 
+C2BasicLinearBlockPool::C2BasicLinearBlockPool(
+        const std::shared_ptr<C2Allocator> &allocator)
+  : mAllocator(allocator) { }
+
+c2_status_t C2BasicLinearBlockPool::fetchLinearBlock(
+        uint32_t capacity,
+        C2MemoryUsage usage,
+        std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+    block->reset();
+
+    std::shared_ptr<C2LinearAllocation> alloc;
+    c2_status_t err = mAllocator->newLinearAllocation(capacity, usage, &alloc);
+    if (err != C2_OK) {
+        return err;
+    }
+
+    *block = _C2BlockFactory::CreateLinearBlock(alloc);
+
+    return C2_OK;
+}
+
+std::shared_ptr<C2LinearBlock> _C2BlockFactory::CreateLinearBlock(
+        const std::shared_ptr<C2LinearAllocation> &alloc,
+        size_t offset, size_t size) {
+    std::shared_ptr<C2Block1D::Impl> impl =
+        std::make_shared<C2Block1D::Impl>(alloc, offset, size);
+    return std::shared_ptr<C2LinearBlock>(new C2LinearBlock(impl, *impl));
+}
 
 /* ========================================== 2D BLOCK ========================================= */
 
@@ -319,18 +348,11 @@ public:
      * Impl's crop is always the or part of the allotted crop of the allocation.
      */
     _C2Block2DImpl(const std::shared_ptr<C2GraphicAllocation> &alloc,
-            const std::shared_ptr<_C2BlockPoolData> &poolData = nullptr,
             const C2Rect &allottedCrop = C2Rect(~0u, ~0u))
         : _C2PlanarSectionAspect(alloc.get(), allottedCrop),
-          mAllocation(alloc),
-          mPoolData(poolData) { }
+          mAllocation(alloc) { }
 
     virtual ~_C2Block2DImpl() = default;
-
-    /** returns pool data  */
-    std::shared_ptr<_C2BlockPoolData> poolData() const {
-        return mPoolData;
-    }
 
     /** returns native handle */
     const C2Handle *handle() const {
@@ -349,7 +371,6 @@ public:
 
 private:
     std::shared_ptr<C2GraphicAllocation> mAllocation;
-    std::shared_ptr<_C2BlockPoolData> mPoolData;
 };
 
 class C2_HIDE _C2MappingBlock2DImpl
@@ -369,8 +390,6 @@ public:
         Mapped(const std::shared_ptr<_C2Block2DImpl> &impl, bool writable, C2Fence *fence __unused)
             : mImpl(impl), mWritable(writable) {
             memset(mData, 0, sizeof(mData));
-            memset(&mLayout, 0, sizeof(mLayout));
-            memset(mOffsetData, 0, sizeof(mOffsetData));
             const C2Rect crop = mImpl->crop();
             // gralloc requires mapping the whole region of interest as we cannot
             // map multiple regions
@@ -427,11 +446,7 @@ public:
         c2_status_t error() const { return mError; }
 
         /** returns data pointer */
-#ifdef C2PORT
-        uint8_t *const *data() const { return mData; }
-#else
         uint8_t *const *data() const { return mOffsetData; }
-#endif
 
         /** returns the plane layout */
         C2PlanarLayout layout() const { return mLayout; }
@@ -596,23 +611,39 @@ C2ConstGraphicBlock C2GraphicBlock::share(const C2Rect &crop, C2Fence fence) {
     return ConstGraphicBlockBuddy(mImpl, C2PlanarSection(*mImpl, crop), fence);
 }
 
-std::shared_ptr<C2LinearBlock> _C2BlockFactory::CreateLinearBlock(
-        const std::shared_ptr<C2LinearAllocation> &alloc,
-        const std::shared_ptr<_C2BlockPoolData> &data, size_t offset, size_t size) {
-    std::shared_ptr<C2Block1D::Impl> impl =
-        std::make_shared<C2Block1D::Impl>(alloc, data, offset, size);
-    return std::shared_ptr<C2LinearBlock>(new C2LinearBlock(impl, *impl));
-}
+/**
+ * Basic block pool implementations.
+ */
+C2BasicGraphicBlockPool::C2BasicGraphicBlockPool(
+        const std::shared_ptr<C2Allocator> &allocator)
+  : mAllocator(allocator) {}
 
+c2_status_t C2BasicGraphicBlockPool::fetchGraphicBlock(
+        uint32_t width,
+        uint32_t height,
+        uint32_t format,
+        C2MemoryUsage usage,
+        std::shared_ptr<C2GraphicBlock> *block /* nonnull */) {
+    block->reset();
+
+    std::shared_ptr<C2GraphicAllocation> alloc;
+    c2_status_t err = mAllocator->newGraphicAllocation(width, height, format, usage, &alloc);
+    if (err != C2_OK) {
+        return err;
+    }
+
+    *block = _C2BlockFactory::CreateGraphicBlock(alloc);
+
+    return C2_OK;
+}
 
 std::shared_ptr<C2GraphicBlock> _C2BlockFactory::CreateGraphicBlock(
         const std::shared_ptr<C2GraphicAllocation> &alloc,
-        const std::shared_ptr<_C2BlockPoolData> &data, const C2Rect &allottedCrop) {
+        const C2Rect &allottedCrop) {
     std::shared_ptr<C2Block2D::Impl> impl =
-        std::make_shared<C2Block2D::Impl>(alloc, data, allottedCrop);
+        std::make_shared<C2Block2D::Impl>(alloc, allottedCrop);
     return std::shared_ptr<C2GraphicBlock>(new C2GraphicBlock(impl, *impl));
 }
-
 
 /* ========================================== BUFFER ========================================= */
 
@@ -636,6 +667,7 @@ private:
     type_t mType;
     std::vector<C2ConstLinearBlock> mLinearBlocks;
     std::vector<C2ConstGraphicBlock> mGraphicBlocks;
+    friend class C2InfoBuffer;
 };
 
 C2BufferData::C2BufferData(const std::vector<C2ConstLinearBlock> &blocks) : mImpl(new Impl(blocks)) {}
@@ -649,6 +681,35 @@ const std::vector<C2ConstLinearBlock> C2BufferData::linearBlocks() const {
 
 const std::vector<C2ConstGraphicBlock> C2BufferData::graphicBlocks() const {
     return mImpl->graphicBlocks();
+}
+
+C2InfoBuffer::C2InfoBuffer(
+    C2Param::Index index, const std::vector<C2ConstLinearBlock> &blocks)
+    : mIndex(index), mData(BufferDataBuddy(blocks)) {
+}
+
+C2InfoBuffer::C2InfoBuffer(
+    C2Param::Index index, const std::vector<C2ConstGraphicBlock> &blocks)
+    : mIndex(index), mData(BufferDataBuddy(blocks)) {
+}
+
+C2InfoBuffer::C2InfoBuffer(
+    C2Param::Index index, const C2BufferData &data)
+    : mIndex(index), mData(data) {
+}
+
+// static
+C2InfoBuffer C2InfoBuffer::CreateLinearBuffer(
+        C2Param::CoreIndex index, const C2ConstLinearBlock &block) {
+    return C2InfoBuffer(index.coreIndex() | C2Param::Index::KIND_INFO | C2Param::Index::DIR_GLOBAL,
+                        { block });
+}
+
+// static
+C2InfoBuffer C2InfoBuffer::CreateGraphicBuffer(
+        C2Param::CoreIndex index, const C2ConstGraphicBlock &block) {
+    return C2InfoBuffer(index.coreIndex() | C2Param::Index::KIND_INFO | C2Param::Index::DIR_GLOBAL,
+                        { block });
 }
 
 class C2Buffer::Impl {
@@ -781,5 +842,3 @@ std::shared_ptr<C2Buffer> C2Buffer::CreateLinearBuffer(const C2ConstLinearBlock 
 std::shared_ptr<C2Buffer> C2Buffer::CreateGraphicBuffer(const C2ConstGraphicBlock &block) {
     return std::shared_ptr<C2Buffer>(new C2Buffer({ block }));
 }
-
-

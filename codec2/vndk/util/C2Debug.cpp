@@ -18,10 +18,9 @@
 #include <util/C2Debug-interface.h>
 #include <util/C2Debug-param.h>
 #include <util/C2InterfaceUtils.h>
+#include <C2Debug.h>
 
 #include <iostream>
-
-#include <util/C2Debug-log.h>
 
 /* -------------------------------- asString -------------------------------- */
 
