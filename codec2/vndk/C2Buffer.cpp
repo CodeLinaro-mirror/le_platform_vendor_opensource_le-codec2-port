@@ -308,13 +308,13 @@ C2BasicLinearBlockPool::C2BasicLinearBlockPool(
   : mAllocator(allocator) { }
 
 c2_status_t C2BasicLinearBlockPool::fetchLinearBlock(
-        uint32_t capacity,
+        uint32_t size,
         C2MemoryUsage usage,
         std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
     block->reset();
 
     std::shared_ptr<C2LinearAllocation> alloc;
-    c2_status_t err = mAllocator->newLinearAllocation(capacity, usage, &alloc);
+    c2_status_t err = mAllocator->newLinearAllocation(size, usage, &alloc);
     if (err != C2_OK) {
         return err;
     }
@@ -326,10 +326,1198 @@ c2_status_t C2BasicLinearBlockPool::fetchLinearBlock(
 
 std::shared_ptr<C2LinearBlock> _C2BlockFactory::CreateLinearBlock(
         const std::shared_ptr<C2LinearAllocation> &alloc,
+        std::function<void(C2LinearBlock*)> deleter) {
+    std::shared_ptr<C2Block1D::Impl> impl =
+        std::make_shared<C2Block1D::Impl>(alloc);
+    return std::shared_ptr<C2LinearBlock>(new C2LinearBlock(impl, *impl), deleter);
+}
+
+std::shared_ptr<C2LinearBlock> _C2BlockFactory::CreateLinearBlock(
+        const std::shared_ptr<C2LinearAllocation> &alloc,
         size_t offset, size_t size) {
     std::shared_ptr<C2Block1D::Impl> impl =
         std::make_shared<C2Block1D::Impl>(alloc, offset, size);
     return std::shared_ptr<C2LinearBlock>(new C2LinearBlock(impl, *impl));
+}
+
+static uint64_t getTimestampNow() {
+    struct timespec ts;
+    uint64_t stamp;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    stamp = ts.tv_nsec / 1000;
+    stamp += (ts.tv_sec * 1000000LL);
+    return stamp;
+}
+
+static std::string getPoolTypeString(const uint32_t poolType) {
+    switch(poolType) {
+        case C2AllocatorStore::DEFAULT_LINEAR:         return std::string("1D");
+        case C2AllocatorStore::DEFAULT_GRAPHIC:        return std::string("2D");
+        case C2AllocatorStore::LINEAR_CONTIGIOUS:      return std::string("1D");
+        case C2AllocatorStore::LINEAR_NON_CONTIGIOUS:  return std::string("1D");
+        case C2AllocatorStore::GRAPHIC_CONTIGIOUS:     return std::string("2D");
+        case C2AllocatorStore::GRAPHIC_NON_CONTIGIOUS: return std::string("2D");
+    }
+    return std::string("NA");
+}
+
+struct C2LinearBufferAllocationDtor {
+    C2LinearBufferAllocationDtor(
+        const std::shared_ptr<C2LinearAllocation> &alloc,
+        const std::shared_ptr<C2BufferStats> stats)
+        : mAllocation(alloc), mStats(stats) {}
+
+    void operator()(C2BufferAllocation *alloc) {
+        delete alloc;
+
+        auto stats = mStats.lock();
+        if (stats) {
+            stats->onBufferEvicted(mAllocation->allocSize());
+        }
+    }
+
+    const std::shared_ptr<C2LinearAllocation> mAllocation;
+    const std::weak_ptr<C2BufferStats> mStats;
+};
+
+struct C2GraphicBufferAllocationDtor {
+    C2GraphicBufferAllocationDtor(
+        const std::shared_ptr<C2GraphicAllocation> &alloc,
+        const std::shared_ptr<C2BufferStats> stats)
+        : mAllocation(alloc), mStats(stats) {}
+
+    void operator()(C2BufferAllocation *alloc) {
+        delete alloc;
+
+        auto stats = mStats.lock();
+        if (stats) {
+            stats->onBufferEvicted(mAllocation->allocSize());
+        }
+    }
+
+    const std::shared_ptr<C2GraphicAllocation> mAllocation;
+    const std::weak_ptr<C2BufferStats> mStats;
+};
+
+AllocBasicParams::AllocBasicParams()
+    : data({ALLOC_NONE, {0, 0}, {0}}) {}
+
+AllocBasicParams::AllocBasicParams(C2MemoryUsage usage, uint32_t size)
+    : data({ALLOC_LINEAR, usage, {[0] = size}}) {}
+
+AllocBasicParams::AllocBasicParams(
+    C2MemoryUsage usage,
+    uint32_t width, uint32_t height, uint32_t format)
+    : data({ALLOC_GRAPHIC, usage, {width, height, format}}) {}
+
+InternalBuffer::InternalBuffer(
+    const std::shared_ptr<C2LinearAllocation> &c2Linear,
+    const std::shared_ptr<C2BufferStats> stats,
+    const AllocBasicParams &c2Param)
+    : mExpireUs(getTimestampNow() + kCacheDeltaUs),
+      mStats(stats),
+      mAllocation(new C2BufferAllocation(c2Linear->handle(), c2Linear->allocSize()),
+        C2LinearBufferAllocationDtor(c2Linear, mStats)),
+      mConfig(c2Param) {
+    mStats->onBufferAllocated(c2Linear->allocSize());
+}
+
+InternalBuffer::InternalBuffer(const std::shared_ptr<C2GraphicAllocation> &c2Graphic,
+    const std::shared_ptr<C2BufferStats> stats,
+    const AllocBasicParams &c2Param)
+    : mExpireUs(getTimestampNow() + kCacheDeltaUs),
+      mStats(stats),
+      mAllocation(new C2BufferAllocation(c2Graphic->handle(), c2Graphic->allocSize()),
+        C2GraphicBufferAllocationDtor(c2Graphic, mStats)),
+      mConfig(c2Param) {
+    mStats->onBufferAllocated(c2Graphic->allocSize());
+}
+
+void InternalBuffer::updateExpire(uint64_t currTsUs) {
+    mExpireUs = currTsUs + kCacheDeltaUs;
+}
+
+bool InternalBuffer::expire(uint64_t currTsUs) const {
+    return currTsUs >= mExpireUs;
+}
+
+C2PoolAllocator::C2PoolAllocator(
+    const std::shared_ptr<C2Allocator> &allocator,
+    const std::shared_ptr<C2BufferStats> &stats)
+    : mAllocator(allocator), mStats(stats) {}
+
+bool C2PoolAllocator::compatible(
+    const AllocBasicParams &newAlloc,
+    const AllocBasicParams &oldAlloc) {
+
+    if (newAlloc.data.allocType != oldAlloc.data.allocType ||
+        newAlloc.data.usage.expected != oldAlloc.data.usage.expected) {
+        return false;
+    }
+
+    for (int i = 0; i < AllocBasicParams::kMaxIntParams; ++i) {
+        if (newAlloc.data.params[i] != oldAlloc.data.params[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+c2_status_t C2PoolAllocator::allocate(
+    const AllocBasicParams &c2Params,
+    std::unique_ptr<InternalBuffer> *buf) {
+    c2_status_t ret = C2_BAD_VALUE;
+    switch(c2Params.data.allocType) {
+        case AllocBasicParams::ALLOC_LINEAR: {
+            std::shared_ptr<C2LinearAllocation> c2Linear;
+            ret = mAllocator->newLinearAllocation(
+                    c2Params.data.params[0], c2Params.data.usage, &c2Linear);
+            if (ret == C2_OK && c2Linear) {
+                *buf = std::make_unique<InternalBuffer>(c2Linear, mStats, c2Params);
+                return ret;
+            }
+            ALOGE("%s: alloc failed. size %u, usage %#llx\n",
+                __func__, c2Params.data.params[0], c2Params.data.usage);
+            break;
+        }
+        case AllocBasicParams::ALLOC_GRAPHIC: {
+            std::shared_ptr<C2GraphicAllocation> c2Graphic;
+            ret = mAllocator->newGraphicAllocation(
+                    c2Params.data.params[0],
+                    c2Params.data.params[1],
+                    c2Params.data.params[2],
+                    c2Params.data.usage, &c2Graphic);
+            if (ret == C2_OK && c2Graphic) {
+                *buf = std::make_unique<InternalBuffer>(c2Graphic, mStats, c2Params);
+                return ret;
+            }
+            ALOGE("%s: alloc failed. w %u, h %u, f %#llx, u %#llx\n",
+                __func__, c2Params.data.params[0],
+                c2Params.data.params[1], c2Params.data.params[2], c2Params.data.usage);
+            break;
+        }
+        case AllocBasicParams::ALLOC_NONE:
+        default:
+            ALOGE("%s: invalid allocType %#x\n", __func__, c2Params.data.allocType);
+            break;
+
+    }
+    return ret;
+}
+
+C2BufferStats::C2BufferStats(const char *name)
+    : mSizeCached(0),
+      mBuffersCached(0),
+      mSizePeak(0),
+      mBuffersPeak(0),
+      mBuffersInUse(0),
+      mTotalAllocations(0),
+      mTotalRecycles(0),
+      mImplName(std::string(name) + ".Stats"),
+      mName(mImplName.c_str()) {}
+
+C2BufferStats::~C2BufferStats() {
+    ALOGD("[%s] Destruction: Active: count(inUse) %zu(%zu), size %.03f MB,"
+            " Peak: count %zu, size %.03f MB, Recycle ratio(%zu/%zu)",
+          mName, mBuffersCached, mBuffersInUse,
+          (float)mSizeCached / (float)(1024 * 1024),
+          mBuffersPeak, (float)mSizePeak / (float)(1024 * 1024),
+          mTotalRecycles, mTotalAllocations);
+}
+
+void C2BufferStats::printStats() {
+    std::lock_guard<std::mutex> lock(mLock);
+    ALOGD("[%s] Active: count(inUse) %zu(%zu), size %.03f MB,"
+            " Peak: count %zu, size %.03f MB, Recycle ratio(%zu/%zu)",
+          mName, mBuffersCached, mBuffersInUse,
+          (float)mSizeCached / (float)(1024 * 1024),
+          mBuffersPeak, (float)mSizePeak / (float)(1024 * 1024),
+          mTotalRecycles, mTotalAllocations);
+}
+
+void C2BufferStats::clearStats() {
+    std::lock_guard<std::mutex> lock(mLock);
+    mSizeCached = 0;
+    mBuffersCached = 0;
+    mSizePeak = 0;
+    mBuffersPeak = 0;
+    mBuffersInUse = 0;
+    mTotalAllocations = 0;
+    mTotalRecycles = 0;
+}
+
+void C2BufferStats::onBufferAllocated(size_t allocSize) {
+    std::lock_guard<std::mutex> lock(mLock);
+    mSizeCached += allocSize;
+    mBuffersCached++;
+
+    mSizePeak += allocSize;
+    mBuffersPeak++;
+
+    mBuffersInUse++;
+    mTotalAllocations++;
+}
+
+void C2BufferStats::onBufferEvicted(size_t allocSize) {
+    std::lock_guard<std::mutex> lock(mLock);
+    mSizeCached -= allocSize;
+    mBuffersCached--;
+}
+
+void C2BufferStats::onBufferRecycled(size_t allocSize) {
+    std::lock_guard<std::mutex> lock(mLock);
+    mBuffersInUse++;
+
+    mTotalAllocations++;
+    mTotalRecycles++;
+}
+
+void C2BufferStats::onBufferUnused(size_t allocSize) {
+    std::lock_guard<std::mutex> lock(mLock);
+    mBuffersInUse--;
+}
+
+C2BasicBufferManager::C2BasicBufferManager(
+    const std::shared_ptr<C2Allocator> &allocator,
+    const std::shared_ptr<C2BufferStats> stats,
+    const char *name)
+    : mTimestampUs(getTimestampNow()),
+      mLastEvictBufferUs(mTimestampUs),
+      mLastLogBufferTsUs(mTimestampUs),
+      mStats(stats),
+      mAllocator(std::make_unique<C2PoolAllocator>(allocator, stats)),
+      mImplName(std::string(name) + ".BBMImpl"),
+      mName(mImplName.c_str()) {
+}
+
+void C2BasicBufferManager::evictUnusedBuffers_l(bool forceEvict) {
+    int32_t poolCapacity =  mFreeBuffers.size() + mBuffersInUse.size();
+
+    if (forceEvict || mTimestampUs >= mLastEvictBufferUs + kCacheDeltaUs ||
+        poolCapacity > kMaxCachedBufferCount) {
+        size_t evicted = 0;
+        for(auto it = mFreeBuffers.begin(); it != mFreeBuffers.end(); ) {
+            if (forceEvict || (*it)->expire(mTimestampUs) ||
+                mFreeBuffers.size() > kCachedBufferCountTarget) {
+                it = mFreeBuffers.erase(it);
+                ++evicted;
+            } else {
+                ++it;
+            }
+        }
+        ALOGV("[%s] %s: total %u, free %u, inUse %u, evicted %zu\n", mName, __func__,
+            poolCapacity, mFreeBuffers.size(), mBuffersInUse.size(), evicted);
+        mLastEvictBufferUs = mTimestampUs;
+    }
+
+    /* print buffer statistics at every 5 secs */
+    if (mTimestampUs >= mLastLogBufferTsUs + kLogDeltaUs) {
+        mStats->printStats();
+        mLastLogBufferTsUs = mTimestampUs;
+    }
+}
+
+c2_status_t C2BasicBufferManager::grabHandle(const AllocBasicParams &params,
+    uint64_t *uId, const native_handle_t** handle) {
+    std::lock_guard<std::mutex> lock(mLock);
+    std::unique_ptr<InternalBuffer> buf;
+    uint32_t bufferId, size;
+    c2_status_t ret;
+
+    /* update current timestamp */
+    mTimestampUs = getTimestampNow();
+
+    auto evictBuffer = [&]() {
+        /* evict buffers which is unused > 1 sec */
+        evictUnusedBuffers_l();
+    };
+    EvictBuffer e(evictBuffer);
+
+    auto it = std::find_if(mFreeBuffers.begin(), mFreeBuffers.end(),
+            [&](const std::unique_ptr<InternalBuffer>& buf) -> bool {
+                return mAllocator->compatible(buf->config(), params);
+            });
+    if (it != mFreeBuffers.end()) {
+        mBuffersInUse.splice(mBuffersInUse.end(), mFreeBuffers, it);
+        *handle = mBuffersInUse.back()->allocation()->handle();
+        *uId = mBuffersInUse.back()->allocation()->uId();
+        size = mBuffersInUse.back()->allocation()->size();
+        ALOGV("[%s] %s: buf-id %llu, size %u, free %u, inUse %u\n", mName, __func__,
+            *uId, size, mFreeBuffers.size(), mBuffersInUse.size());
+        mStats->onBufferRecycled(size);
+        return C2_OK;
+    }
+
+    ret = mAllocator->allocate(params, &buf);
+    if (ret != C2_OK) {
+        ALOGE("[%s] %s: buffer allocation failed\n", mName, __func__);
+        return C2_NO_MEMORY;
+    }
+    mBuffersInUse.push_back(std::move(buf));
+    *handle = mBuffersInUse.back()->allocation()->handle();
+    *uId = mBuffersInUse.back()->allocation()->uId();
+    size = mBuffersInUse.back()->allocation()->size();
+    ALOGV("[%s] %s: buf-id %llu, size %u, free %u, inUse %u\n", mName, __func__,
+        *uId, size, mFreeBuffers.size(), mBuffersInUse.size());
+
+    return C2_OK;
+}
+
+void C2BasicBufferManager::returnHandle(uint64_t uId) {
+    std::lock_guard<std::mutex> lock(mLock);
+    uint32_t size;
+
+    /* update current timestamp */
+    mTimestampUs = getTimestampNow();
+
+    auto evictBuffer = [&]() {
+        /* evict buffers which is unused > 1 sec */
+        evictUnusedBuffers_l();
+    };
+    EvictBuffer e(evictBuffer);
+
+    auto it = std::find_if(
+            mBuffersInUse.begin(), mBuffersInUse.end(),
+            [&](const std::unique_ptr<InternalBuffer>& buf) -> bool {
+                return buf->allocation()->uId() == uId;
+            });
+    if (it == mBuffersInUse.end()) {
+        ALOGE("[%s] %s: not owned by client: buf-id %llu",
+            mName, __func__, uId);
+        return;
+    }
+
+    mFreeBuffers.splice(mFreeBuffers.end(), mBuffersInUse, it);
+    mFreeBuffers.back()->updateExpire(mTimestampUs);
+    size = mFreeBuffers.back()->allocation()->size();
+
+    ALOGV("[%s] %s: buf-id %llu, size %u, free %u, inUse %u\n",
+        mName, __func__, (*it)->allocation()->uId(), size,
+        mFreeBuffers.size(), mBuffersInUse.size());
+
+    mStats->onBufferUnused(size);
+}
+
+C2CustomContigiousBufferManager::C2CustomContigiousBufferManager(
+    const std::shared_ptr<C2Allocator> &allocator,
+    const std::shared_ptr<C2BufferStats> stats, const char *name)
+    : mInit(C2_NO_INIT),
+      mNextSlot(0),
+      mStats(stats),
+      mAllocator(std::make_unique<C2PoolAllocator>(allocator, stats)),
+      mImplName(std::string(name) + ".CCBMImpl"),
+      mName(mImplName.c_str()) {}
+
+c2_status_t C2CustomContigiousBufferManager::initialize(
+    const AllocBasicParams &params, uint32_t capacity) {
+    std::lock_guard<std::mutex> lock(mLock);
+    std::unique_ptr<InternalBuffer> buf;
+    uint32_t bufferId;
+    c2_status_t ret;
+    mBuffers.clear();
+    mStats->clearStats();
+    for (size_t i = 0; i < capacity; ++i) {
+        bufferId = mBuffers.size();
+        ret = mAllocator->allocate(params, &buf);
+        if (ret != C2_OK) {
+            ALOGE("[%s] %s: buffer allocation failed\n", mName, __func__);
+            mInit = C2_CORRUPTED;
+            return C2_CORRUPTED;
+        }
+        mBuffers.push_back({bufferId, std::move(buf), false});
+    }
+    mNextSlot = 0;
+    mInit = C2_OK;
+    return C2_OK;
+}
+
+c2_status_t C2CustomContigiousBufferManager::grabHandle(
+    const AllocBasicParams &params, uint32_t *pId,
+    uint64_t *uId, const native_handle_t** handle) {
+    std::lock_guard<std::mutex> lock(mLock);
+    int32_t size;
+    if (mInit != C2_OK) {
+        ALOGE("[%s] %s rejected. Not inited yet %u\n", mName, __func__, mInit);
+        return mInit;
+    }
+
+    if (mNextSlot >= mBuffers.size()) {
+        mNextSlot = 0;
+    }
+
+    if (!mBuffers[mNextSlot].ownedByClient) {
+        mBuffers[mNextSlot].ownedByClient = true;
+        *pId = mBuffers[mNextSlot].id;
+        *handle = mBuffers[mNextSlot].buf->allocation()->handle();
+        *uId = mBuffers[mNextSlot].buf->allocation()->uId();
+        size = mBuffers[mNextSlot].buf->allocation()->size();
+        ALOGV("[%s] %s: index %u, buf-id %llu, size %u\n",
+            mName, __func__, *pId, *uId, size);
+        mNextSlot++;
+        mStats->onBufferRecycled(size);
+        return C2_OK;
+    }
+    ALOGE("[%s] %s failed. index %u, buf-id %llu, clientOwn %u\n",
+        mName, __func__, mNextSlot,
+        mBuffers[mNextSlot].buf->allocation()->uId(),
+        mBuffers[mNextSlot].ownedByClient);
+
+    return C2_TIMED_OUT;
+}
+
+void C2CustomContigiousBufferManager::returnHandle(uint32_t pId, uint64_t uId) {
+    std::lock_guard<std::mutex> lock(mLock);
+    uint32_t size;
+
+    if (mInit != C2_OK) {
+        ALOGE("[%s] %s rejected. Not inited yet %u\n", mName, __func__, mInit);
+        return;
+    }
+
+    if (pId >= mBuffers.size()) {
+        ALOGE("[%s] %s: invalid index %u, buf-id %llu, capacity %u\n",
+            mName, __func__, pId, uId, mBuffers.size());
+        return;
+    }
+
+    if (mBuffers[pId].id != pId || mBuffers[pId].buf->allocation()->uId() != uId) {
+        ALOGE("[%s] %s: param mismatch. [index, buf-id] actual[%u, %llu] expected[%u, %llu]\n",
+            mName, __func__, pId, uId,
+            mBuffers[pId].id, mBuffers[pId].buf->allocation()->uId());
+        return;
+    }
+
+    if (!mBuffers[pId].ownedByClient) {
+        ALOGE("[%s] %s: not owned by client: index %u, buf-id %llu",
+            mName, __func__, pId, uId);
+    }
+    mBuffers[pId].ownedByClient = false;
+    size = mBuffers[pId].buf->allocation()->uId();
+    ALOGV("[%s] %s: index %u, buf-id %llu\n", mName, __func__, pId, uId);
+
+    mStats->onBufferUnused(size);
+}
+
+// not supported
+c2_status_t C2CustomContigiousBufferManager::grow(size_t newSize) {
+    ALOGE("[%s] %s: not supported for contigious pool\n",
+        mName, __func__);
+
+    return C2_OK;
+}
+
+c2_status_t C2CustomContigiousBufferManager::shrink(size_t newSize) {
+    std::lock_guard<std::mutex> lock(mLock);
+
+    if (mInit != C2_OK) {
+        ALOGE("[%s] %s rejected. Not inited yet %u\n", mName, __func__, mInit);
+        return mInit;
+    }
+
+    ALOGV("[%s] %s: contigious pool %u -> %u\n",
+        mName, __func__, mBuffers.size(), newSize);
+    while (mBuffers.size() > newSize) {
+        mBuffers.pop_back();
+    }
+    return C2_OK;
+}
+
+C2CustomNonContigiousBufferManager::C2CustomNonContigiousBufferManager(
+    const std::shared_ptr<C2Allocator> &allocator,
+    const std::shared_ptr<C2BufferStats> stats, const char *name)
+    : mInit(C2_NO_INIT),
+      mPoolCapacity(0),
+      mStats(stats),
+      mAllocator(std::make_unique<C2PoolAllocator>(allocator, stats)),
+      mImplName(std::string(name) + ".CNCBMImpl"),
+      mName(mImplName.c_str()) {}
+
+c2_status_t C2CustomNonContigiousBufferManager::initialize(
+    const AllocBasicParams &params, uint32_t capacity) {
+    std::lock_guard<std::mutex> lock(mLock);
+    mFreeBuffers.clear();
+    mBuffersInUse.clear();
+    mStats->clearStats();
+    mPoolCapacity = capacity;
+    mInit = C2_OK;
+
+    return C2_OK;
+}
+
+c2_status_t C2CustomNonContigiousBufferManager::grabHandle(
+    const AllocBasicParams &params, uint32_t *pId,
+    uint64_t *uId, const native_handle_t** handle) {
+    std::lock_guard<std::mutex> lock(mLock);
+    std::unique_ptr<InternalBuffer> buf;
+    uint32_t bufferId, size;
+    c2_status_t ret;
+
+    if (mInit != C2_OK) {
+        ALOGE("[%s] %s rejected. Not inited yet %u\n", mName, __func__, mInit);
+        return mInit;
+    }
+
+    if (!mFreeBuffers.empty()) {
+        mBuffersInUse.splice(mBuffersInUse.end(), mFreeBuffers, mFreeBuffers.begin());
+        *pId = mBuffersInUse.back().id;
+        *handle = mBuffersInUse.back().buf->allocation()->handle();
+        *uId = mBuffersInUse.back().buf->allocation()->uId();
+        size = mBuffersInUse.back().buf->allocation()->size();
+        ALOGV("[%s] %s: index %u, buf-id %llu, size %u, free %u, inUse %u\n", mName, __func__,
+            *pId, *uId, size, mFreeBuffers.size(), mBuffersInUse.size());
+        mStats->onBufferRecycled(size);
+        return C2_OK;
+    }
+
+    if (mBuffersInUse.size() < mPoolCapacity) {
+        bufferId = mBuffersInUse.size();
+        ret = mAllocator->allocate(params, &buf);
+        if (ret != C2_OK) {
+            ALOGE("[%s] %s: buffer allocation failed\n", mName, __func__);
+            mInit = C2_CORRUPTED;
+            return C2_CORRUPTED;
+        }
+        mBuffersInUse.push_back({bufferId, std::move(buf)});
+        *pId = mBuffersInUse.back().id;
+        *handle = mBuffersInUse.back().buf->allocation()->handle();
+        *uId = mBuffersInUse.back().buf->allocation()->uId();
+        size = mBuffersInUse.back().buf->allocation()->size();
+        ALOGV("[%s] %s: index %u, buf-id %llu, size %u, free %u, inUse %u\n", mName, __func__,
+            *pId, *uId, size, mFreeBuffers.size(), mBuffersInUse.size());
+        return C2_OK;
+    }
+
+    ALOGE("[%s] %s failed. All handles were with client. free %u, inUse %u\n",
+        mName, __func__, mFreeBuffers.size(), mBuffersInUse.size());
+
+    return C2_TIMED_OUT;
+}
+
+void C2CustomNonContigiousBufferManager::returnHandle(uint32_t pId, uint64_t uId) {
+    std::lock_guard<std::mutex> lock(mLock);
+    int32_t size = 0;
+
+    if (mInit != C2_OK) {
+        ALOGE("[%s] %s rejected. Not inited yet %u\n", mName, __func__, mInit);
+        return;
+    }
+
+    auto it = std::find_if(
+            mBuffersInUse.begin(), mBuffersInUse.end(),
+            [&](const Entry& entry) -> bool {
+                return entry.id == pId && entry.buf->allocation()->uId() == uId;
+            });
+    if (it == mBuffersInUse.end()) {
+        ALOGE("[%s] %s: not owned by client: index %lu, buf-id %llu",
+            mName, __func__, pId, uId);
+        return;
+    }
+
+    mFreeBuffers.splice(mFreeBuffers.end(), mBuffersInUse, it);
+    size = (*it).buf->allocation()->size();
+
+    ALOGV("[%s] %s: index %u, buf-id %llu, free %u, inUse %u\n",
+        mName, __func__, (*it).id, (*it).buf->allocation()->uId(),
+        mFreeBuffers.size(), mBuffersInUse.size());
+
+    mStats->onBufferUnused(size);
+}
+
+c2_status_t C2CustomNonContigiousBufferManager::grow(size_t newSize) {
+    std::lock_guard<std::mutex> lock(mLock);
+
+    ALOGV("[%s] %s: increase pool capacity %u -> %u\n",
+        mName, __func__, mPoolCapacity, newSize);
+    mPoolCapacity = newSize;
+
+    return C2_OK;
+}
+
+c2_status_t C2CustomNonContigiousBufferManager::shrink(size_t newSize) {
+    std::lock_guard<std::mutex> lock(mLock);
+    uint32_t totalAvailableBuffers;
+
+    if (mInit != C2_OK) {
+        ALOGE("[%s] %s rejected. Not inited yet %u\n", mName, __func__, mInit);
+        return mInit;
+    }
+
+    totalAvailableBuffers = mFreeBuffers.size() + mBuffersInUse.size();
+
+    if (totalAvailableBuffers <= newSize) {
+        ALOGV("[%s] %s: capacity %u, free %u, inUse %u\n",
+            mName, __func__, mPoolCapacity,
+            mFreeBuffers.size(), mBuffersInUse.size());
+        mPoolCapacity = newSize;
+        return C2_OK;
+    }
+
+    while (totalAvailableBuffers > newSize) {
+        if (!mFreeBuffers.empty()) {
+            mFreeBuffers.pop_back();
+            totalAvailableBuffers--;
+        } else if (!mBuffersInUse.empty()) {
+            mBuffersInUse.pop_back();
+            totalAvailableBuffers--;
+        }
+    }
+    ALOGV("[%s] %s: pool capacity %u -> %u, free %u, inUse %u\n",
+        mName, __func__, mPoolCapacity, newSize,
+        mFreeBuffers.size(), mBuffersInUse.size());
+
+    mPoolCapacity = newSize;
+    return C2_OK;
+}
+
+C2CustomBufferManager* getC2CustomBufferManager(
+    const std::shared_ptr<C2Allocator> &allocator,
+    const std::shared_ptr<C2BufferStats> stats,
+    bool contigious, const char* name) {
+    C2CustomBufferManager* manager = nullptr;
+
+    if(contigious) {
+        manager = new C2CustomContigiousBufferManager(allocator, stats, name);
+    } else {
+        manager = new C2CustomNonContigiousBufferManager(allocator, stats, name);
+    }
+
+    return manager;
+}
+
+class C2BasicBlockPool::Impl {
+public:
+    Impl(const std::shared_ptr<C2Allocator> &allocator,
+        const char *name)
+        : mImplName(std::string(name) + ".Impl"),
+          mName(mImplName.c_str()),
+          mStats(new C2BufferStats(mName)),
+          mAllocator(allocator),
+          mBufferPoolManager(new C2BasicBufferManager(allocator, mStats, mName)) {}
+
+    virtual ~Impl() = default;
+
+    c2_status_t fetchLinearBlock(
+            uint32_t size,
+            C2MemoryUsage usage,
+            std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+        std::shared_ptr<C2LinearAllocation> alloc;
+        const native_handle_t *cHandle, *origHandle;
+        uint64_t uniqueId;
+        c2_status_t ret;
+        block->reset();
+
+        /* convert to BasicParam type */
+        AllocBasicParams c2Linear(usage, size);
+
+        /* allocate/acquire nativehandle */
+        ret = mBufferPoolManager->grabHandle(c2Linear, &uniqueId, &origHandle);
+        if (ret != C2_OK) {
+            mStats->printStats();
+            return ret;
+        }
+
+        /* clone nativehandle */
+        cHandle = native_handle_clone(origHandle);
+
+        /* import linear allocation using cloned handle */
+        ret = mAllocator->priorLinearAllocation(cHandle, &alloc);
+        if (ret == C2_OK && alloc) {
+            *block = _C2BlockFactory::CreateLinearBlock(alloc,
+                [manager = mBufferPoolManager,
+                    uId = uniqueId](C2LinearBlock *blk) {
+                    delete blk;
+                    manager->returnHandle(uId);
+                });
+            if (*block) {
+                return C2_OK;
+            }
+            ALOGE("[%s] %s: CreateLinearBlock failed\n", mName, __func__);
+            return C2_NO_MEMORY;
+        }
+
+        return C2_CORRUPTED;
+    }
+
+    c2_status_t fetchGraphicBlock(
+            uint32_t width,
+            uint32_t height,
+            uint32_t format,
+            C2MemoryUsage usage,
+            std::shared_ptr<C2GraphicBlock> *block) {
+        std::shared_ptr<C2GraphicAllocation> alloc;
+        const native_handle_t *cHandle, *origHandle;
+        uint64_t uniqueId;
+        c2_status_t ret;
+        block->reset();
+
+        /* convert to BasicParam type */
+        AllocBasicParams c2Graphic(usage, width, height, format);
+
+        /* allocate/acquire nativehandle */
+        ret = mBufferPoolManager->grabHandle(c2Graphic, &uniqueId, &origHandle);
+        if (ret != C2_OK) {
+            mStats->printStats();
+            return ret;
+        }
+
+        /* clone nativehandle */
+        cHandle = native_handle_clone(origHandle);
+
+        /* import graphic allocation using cloned handle */
+        ret = mAllocator->priorGraphicAllocation(cHandle, &alloc);
+        if (ret == C2_OK && alloc) {
+            *block = _C2BlockFactory::CreateGraphicBlock(alloc,
+                [manager = mBufferPoolManager,
+                    uId = uniqueId](C2GraphicBlock *blk) {
+                    delete blk;
+                    manager->returnHandle(uId);
+                });
+            if (*block) {
+                return C2_OK;
+            }
+            ALOGE("[%s] %s: CreateGraphicBlock failed\n", mName, __func__);
+            return C2_NO_MEMORY;
+        }
+
+        return C2_CORRUPTED;
+    }
+
+private:
+    std::string mImplName;
+    const char* mName;
+    const std::shared_ptr<C2BufferStats> mStats;
+    std::shared_ptr<C2Allocator> mAllocator;
+    std::shared_ptr<C2BasicBufferManager> mBufferPoolManager;
+};
+
+C2BasicBlockPool::C2BasicBlockPool(
+        const std::shared_ptr<C2Allocator> &allocator,
+        const uint32_t poolType, const local_id_t localId)
+        : mAllocator(allocator),
+          mLocalId(localId),
+          mPoolType(poolType),
+          mImpl(new Impl(allocator, std::string("BBP-" + getPoolTypeString(poolType) +
+            std::string("-P") + std::to_string(localId) + "-A" +
+            std::to_string(allocator->getId())).c_str())) {}
+
+C2BasicBlockPool::~C2BasicBlockPool() {
+}
+
+c2_status_t C2BasicBlockPool::fetchLinearBlock(
+        uint32_t size,
+        C2MemoryUsage usage,
+        std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+    if (mImpl) {
+        return mImpl->fetchLinearBlock(size, usage, block);
+    }
+    return C2_CORRUPTED;
+}
+
+c2_status_t C2BasicBlockPool::fetchGraphicBlock(
+        uint32_t width,
+        uint32_t height,
+        uint32_t format,
+        C2MemoryUsage usage,
+        std::shared_ptr<C2GraphicBlock> *block) {
+    if (mImpl) {
+        return mImpl->fetchGraphicBlock(width, height, format, usage, block);
+    }
+    return C2_CORRUPTED;
+}
+
+template<typename T>
+bool isInBounds(const T& val, const T& min, const T& max) {
+    return min <= val && val <= max;
+}
+
+class C2CustomBlockPool::Impl {
+public:
+    Impl(const std::shared_ptr<C2Allocator> &allocator,
+        const bool contigious, const char* name)
+            : mInit(C2_NO_INIT),
+              mImplName(std::string(name) + ".Impl"),
+              mName(mImplName.c_str()),
+              mIsContigiousPool(contigious),
+              mStats(new C2BufferStats(mName)),
+              mAllocator(allocator),
+              mBufferPoolManager(getC2CustomBufferManager(allocator, mStats, contigious, mName)),
+              mPoolCapacity(kMinPoolCapacity) {
+    }
+
+    virtual ~Impl() = default;
+
+    c2_status_t initPool(const AllocBasicParams &params, uint32_t poolCapacity) {
+        c2_status_t ret;
+
+        if (params.data.allocType == AllocBasicParams::ALLOC_LINEAR) {
+            mConfig = params;
+            mPoolCapacity = poolCapacity;
+
+            ret = mBufferPoolManager->initialize(mConfig, mPoolCapacity);
+            if (ret != C2_OK) {
+                ALOGE("[%s] %s: failed %d\n", mName, __func__, ret);
+                mInit = ret;
+                return ret;
+            }
+            mInit = C2_OK;
+            ALOGD("[%s] Pool inited successfully. size %u, usage %#llx, count %d\n",
+                mName, mConfig.data.params[0], mConfig.data.usage.expected, mPoolCapacity);
+        } else if (params.data.allocType == AllocBasicParams::ALLOC_GRAPHIC) {
+            mConfig = params;
+            mPoolCapacity = poolCapacity;
+
+            ret = mBufferPoolManager->initialize(mConfig, mPoolCapacity);
+            if (ret != C2_OK) {
+                ALOGE("[%s] %s failed %d\n", mName, __func__, ret);
+                mInit = ret;
+                return ret;
+            }
+            mInit = C2_OK;
+            ALOGD("[%s] Pool inited successfully. w %u, h %u, f %#llx, u %#llx, count %d\n",
+                mName,
+                mConfig.data.params[0],
+                mConfig.data.params[1],
+                mConfig.data.params[2],
+                mConfig.data.usage.expected, mPoolCapacity);
+
+        }
+        return C2_OK;
+    };
+
+    c2_status_t shrinkPool(const AllocBasicParams &params, uint32_t poolCapacity) {
+        c2_status_t ret = C2_OK;
+        const char *poolName;
+
+        if (params.data.allocType == AllocBasicParams::ALLOC_LINEAR ||
+            params.data.allocType == AllocBasicParams::ALLOC_GRAPHIC) {
+            ret = mBufferPoolManager->shrink(poolCapacity);
+            if (ret != C2_OK) {
+                ALOGE("[%s] %s failed %u -> %u. ret %d\n",
+                    mName, __func__, mPoolCapacity, poolCapacity, ret);
+                mInit = ret;
+                return ret;
+            }
+            poolName = (params.data.allocType ==
+                            AllocBasicParams::ALLOC_LINEAR) ? "Linear" : "Graphic";
+            ALOGD("[%s] shrink%sPool: successful. pool shrinked %u -> %u\n",
+                mName, poolName, mPoolCapacity, poolCapacity);
+            mPoolCapacity = poolCapacity;
+
+            return ret;
+        }
+        return ret;
+    };
+
+    c2_status_t growPool(const AllocBasicParams &params, uint32_t poolCapacity) {
+        c2_status_t ret = C2_OK;
+        const char *poolName;
+
+        if (params.data.allocType == AllocBasicParams::ALLOC_LINEAR ||
+            params.data.allocType == AllocBasicParams::ALLOC_GRAPHIC) {
+            ret = mBufferPoolManager->grow(poolCapacity);
+            if (ret != C2_OK) {
+                ALOGE("[%s] %s failed %u -> %u. ret %d\n",
+                    mName, __func__, mPoolCapacity, poolCapacity, ret);
+                mInit = ret;
+                return ret;
+            }
+            poolName = (params.data.allocType ==
+                            AllocBasicParams::ALLOC_LINEAR) ? "Linear" : "Graphic";
+            ALOGD("[%s] grow%sPool: successful. pool grown %u -> %u\n",
+                mName, poolName, mPoolCapacity, poolCapacity);
+            mPoolCapacity = poolCapacity;
+        }
+        return ret;
+    };
+
+    c2_status_t init(const AllocBasicParams &c2Params, uint32_t poolCapacity) {
+        std::lock_guard<std::mutex> lock(mLock);
+        const char *func = __func__;
+        c2_status_t ret = C2_OK;
+
+        auto isReinitNeeded = [&](const AllocBasicParams &params) -> bool {
+            bool ret = false;
+
+            if (params.data.allocType != mConfig.data.allocType ||
+                params.data.usage.expected != mConfig.data.usage.expected) {
+                ret = true;
+            } else if (params.data.allocType == AllocBasicParams::ALLOC_LINEAR) {
+                ret = params.data.params[0] != mConfig.data.params[0];
+            } else if (params.data.allocType == AllocBasicParams::ALLOC_GRAPHIC) {
+                ret = (params.data.params[0] != mConfig.data.params[0] ||
+                        params.data.params[1] != mConfig.data.params[1] ||
+                        params.data.params[2] != mConfig.data.params[2]);
+            }
+            return ret;
+        };
+
+        auto isCountUpdateNeeded = [&](uint32_t poolCapacity) -> bool {
+            return poolCapacity != mPoolCapacity;
+        };
+
+        auto isValidParam = [&](const AllocBasicParams &params, uint32_t capacity) -> bool {
+            if (!isInBounds(capacity, kMinPoolCapacity, kMaxPoolCapacity)) {
+                ALOGE("[%s] %s: invalid param. capacity %u\n",
+                    mName, func, poolCapacity);
+                return false;
+            }
+            if (params.data.allocType == AllocBasicParams::ALLOC_LINEAR) {
+                if (!params.data.params[0]) {
+                    ALOGE("[%s] %s: Linear pool. invalid param. size %u\n",
+                        mName, func, poolCapacity);
+                    return false;
+                }
+            } else if (params.data.allocType == AllocBasicParams::ALLOC_GRAPHIC) {
+                if (!params.data.params[0] || !params.data.params[1] ||
+                    !params.data.params[2]) {
+                    ALOGE("[%s] %s: Graphic pool. invalid param."
+                            " w %u, h %u, f %#llx, u %#llx, capacity %u\n",
+                        mName, func, params.data.params[0],
+                        params.data.params[1],
+                        params.data.params[2],
+                        params.data.usage.expected, poolCapacity);
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        if (!isValidParam(c2Params, poolCapacity)) {
+            mInit = C2_CORRUPTED;
+            return C2_CORRUPTED;
+        }
+
+        /* init pool for basic param change */
+        if (isReinitNeeded(c2Params)) {
+            ret = initPool(c2Params, poolCapacity);
+            if (ret != C2_OK) {
+                return ret;
+            }
+        } else if (isCountUpdateNeeded(poolCapacity)) {
+            /* shrink pool - allowed for both contigious and non-contigius pool */
+            if (poolCapacity < mPoolCapacity) {
+                ret = shrinkPool(c2Params, poolCapacity);
+                if (ret != C2_OK) {
+                    return ret;
+                }
+            } else {
+                /* grow non-contigious pool */
+                if (!mIsContigiousPool) {
+                    ret = growPool(c2Params, poolCapacity);
+                    if (ret != C2_OK) {
+                        return ret;
+                    }
+                } else {
+                    /* growing contigious pool not alloed. Reinit again */
+                    ret = initPool(c2Params, poolCapacity);
+                    if (ret != C2_OK) {
+                        return ret;
+                    }
+                }
+            }
+        }
+        mStats->printStats();
+
+        return C2_OK;
+    }
+
+    c2_status_t fetchLinearBlock(
+            uint32_t size, C2MemoryUsage usage,
+            std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+        std::lock_guard<std::mutex> lock(mLock);
+        std::shared_ptr<C2LinearAllocation> alloc;
+        const native_handle_t *cHandle, *origHandle;
+        uint64_t uniqueId;
+        uint32_t bufferId;
+        c2_status_t ret;
+
+        auto isParamMismatch = [&](uint32_t size, C2MemoryUsage usage) -> bool {
+            return size != mConfig.data.params[0] || usage.expected != mConfig.data.usage.expected;
+        };
+
+        block->reset();
+
+        /* convert to BasicParam type */
+        AllocBasicParams c2Linear(usage, size);
+
+        if (mInit == C2_CORRUPTED) {
+            return mInit;
+        } else if (mInit == C2_NO_INIT) {
+            /* init pool if not inited so far */
+            ret = initPool(c2Linear, mPoolCapacity);
+            if (ret != C2_OK) {
+                return ret;
+            }
+        }
+
+        /* sanitize input param */
+        if (isParamMismatch(size, usage)) {
+            ALOGE("[%s] %s: invalid param[size, usage] %u, %#llx -> %u, %#llx\n",
+                mName, __func__,
+                mConfig.data.params[0],
+                mConfig.data.usage.expected,
+                size, usage.expected);
+            mInit = C2_CORRUPTED;
+            return C2_CORRUPTED;
+        }
+
+        /* allocate/acquire nativehandle */
+        ret = mBufferPoolManager->grabHandle(c2Linear, &bufferId, &uniqueId, &origHandle);
+        if (ret != C2_OK) {
+            mStats->printStats();
+            return ret;
+        }
+
+        /* clone nativehandle */
+        cHandle = native_handle_clone(origHandle);
+
+        /* import linear allocation using cloned handle */
+        ret = mAllocator->priorLinearAllocation(cHandle, &alloc);
+        if (ret == C2_OK && alloc) {
+            *block = _C2BlockFactory::CreateLinearBlock(alloc,
+                [manager = mBufferPoolManager, bId = bufferId,
+                    uId = uniqueId](C2LinearBlock *blk) {
+                    delete blk;
+                    manager->returnHandle(bId, uId);
+                });
+            if (*block) {
+                return C2_OK;
+            }
+            ALOGE("[%s] %s: CreateLinearBlock failed\n", mName, __func__);
+            return C2_NO_MEMORY;
+        }
+
+        return C2_OK;
+    }
+
+    c2_status_t fetchGraphicBlock(uint32_t width, uint32_t height,
+        uint32_t format, C2MemoryUsage usage,
+        std::shared_ptr<C2GraphicBlock> *block) {
+        std::lock_guard<std::mutex> lock(mLock);
+        std::shared_ptr<C2GraphicAllocation> alloc;
+        const native_handle_t *cHandle, *origHandle;
+        uint64_t uniqueId;
+        uint32_t bufferId;
+        c2_status_t ret;
+
+        auto isParamMismatch = [&](uint32_t width, uint32_t height,
+            uint32_t format, C2MemoryUsage usage) -> bool {
+            return width != mConfig.data.params[0] ||
+                height != mConfig.data.params[1] ||
+                format != mConfig.data.params[2] ||
+                usage.expected != mConfig.data.usage.expected;
+        };
+
+        /* convert to BasicParam type */
+        AllocBasicParams c2Graphic(usage, width, height, format);
+
+        block->reset();
+        if (mInit == C2_CORRUPTED) {
+            return mInit;
+        } else if (mInit == C2_NO_INIT) {
+            /* init pool if not inited so far */
+            ret = initPool(c2Graphic, mPoolCapacity);
+            if (ret != C2_OK) {
+                return ret;
+            }
+        }
+
+        /* sanitize input param */
+        if (isParamMismatch(width, height, format, usage)) {
+            ALOGE("[%s] %s: invalid param[w, h, f, u] %u, %u, %#llx, %#llx -> %u, %u, %#llx, %#llx",
+                mName, __func__, mConfig.data.params[0], mConfig.data.params[1],
+                mConfig.data.params[2], mConfig.data.usage.expected,
+                width, height, format, usage.expected);
+            mInit = C2_CORRUPTED;
+            return C2_CORRUPTED;
+        }
+
+        /* allocate/acquire nativehandle */
+        ret = mBufferPoolManager->grabHandle(c2Graphic, &bufferId, &uniqueId, &origHandle);
+        if (ret != C2_OK) {
+            mStats->printStats();
+            return ret;
+        }
+
+        /* clone nativehandle */
+        cHandle = native_handle_clone(origHandle);
+
+        /* import graphic allocation using cloned handle */
+        ret = mAllocator->priorGraphicAllocation(cHandle, &alloc);
+        if (ret == C2_OK && alloc) {
+            *block = _C2BlockFactory::CreateGraphicBlock(alloc,
+                [manager = mBufferPoolManager, bId = bufferId,
+                    uId = uniqueId](C2GraphicBlock *blk) {
+                    delete blk;
+                    manager->returnHandle(bId, uId);
+                });
+            if (*block) {
+                return C2_OK;
+            }
+            ALOGE("[%s] %s: CreateGraphicBlock failed\n", mName, __func__);
+            return C2_NO_MEMORY;
+        }
+
+        return C2_OK;
+    }
+
+private:
+    c2_status_t mInit;
+    std::mutex mLock;
+    uint32_t mPoolCapacity;
+    AllocBasicParams mConfig;
+    std::string mImplName;
+    const char* mName;
+    const bool mIsContigiousPool;
+    const std::shared_ptr<C2BufferStats> mStats;
+    const std::shared_ptr<C2Allocator> mAllocator;
+    const std::shared_ptr<C2CustomBufferManager> mBufferPoolManager;
+    static constexpr uint32_t kMinPoolCapacity = 2;
+    static constexpr uint32_t kMaxPoolCapacity = 64;
+};
+
+C2CustomBlockPool::C2CustomBlockPool(
+        const std::shared_ptr<C2Allocator> &allocator,
+        const uint32_t poolType, const local_id_t localId, const bool contigious)
+        : mAllocator(allocator),
+          mLocalId(localId),
+          mPoolType(poolType),
+          mImpl(new Impl(allocator, contigious, std::string("CBP-" + getPoolTypeString(poolType) +
+            std::string("-P") + std::to_string(localId) + "-A" +
+            std::to_string(allocator->getId())).c_str())) {}
+
+C2CustomBlockPool::~C2CustomBlockPool() {
+}
+
+c2_status_t C2CustomBlockPool::fetchLinearBlock(
+        uint32_t size,
+        C2MemoryUsage usage,
+        std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+    if (mImpl) {
+        return mImpl->fetchLinearBlock(size, usage, block);
+    }
+    return C2_CORRUPTED;
+}
+
+c2_status_t C2CustomBlockPool::fetchGraphicBlock(
+        uint32_t width,
+        uint32_t height,
+        uint32_t format,
+        C2MemoryUsage usage,
+        std::shared_ptr<C2GraphicBlock> *block) {
+    if (mImpl) {
+        return mImpl->fetchGraphicBlock(width, height, format, usage, block);
+    }
+    return C2_CORRUPTED;
+}
+
+c2_status_t C2CustomBlockPool::init(const AllocBasicParams &c2Params, uint32_t poolCapacity) {
+    if (mImpl) {
+        return mImpl->init(c2Params, poolCapacity);
+    }
+    return C2_CORRUPTED;
 }
 
 /* ========================================== 2D BLOCK ========================================= */
@@ -635,6 +1823,14 @@ c2_status_t C2BasicGraphicBlockPool::fetchGraphicBlock(
     *block = _C2BlockFactory::CreateGraphicBlock(alloc);
 
     return C2_OK;
+}
+
+std::shared_ptr<C2GraphicBlock> _C2BlockFactory::CreateGraphicBlock(
+        const std::shared_ptr<C2GraphicAllocation> &alloc,
+        std::function<void(C2GraphicBlock*)> deleter) {
+    std::shared_ptr<C2Block2D::Impl> impl =
+        std::make_shared<C2Block2D::Impl>(alloc);
+    return std::shared_ptr<C2GraphicBlock>(new C2GraphicBlock(impl, *impl), deleter);
 }
 
 std::shared_ptr<C2GraphicBlock> _C2BlockFactory::CreateGraphicBlock(

@@ -127,6 +127,8 @@ public:
 
     virtual bool equals(const std::shared_ptr<const C2GraphicAllocation> &other) const override;
 
+    virtual uint32_t allocSize() const override;
+
     bool Alloc(struct gbm_device *gbm, uint32_t w, uint32_t h, uint32_t format, int flag);
 
     C2AllocationGBM(struct gbm_device *gbm, uint32_t width, uint32_t height,
@@ -136,6 +138,7 @@ public:
 
 private:
     C2HandleGBM *mHandle;
+    uint32_t mAllocSize;
     void *mBase;
     size_t mMapSize;
     struct gbm_bo *mBo;

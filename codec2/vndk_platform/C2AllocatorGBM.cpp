@@ -105,7 +105,7 @@ const C2HandleGBM* C2HandleGBM::Import(
 C2AllocationGBM::C2AllocationGBM(struct gbm_device *gbm, uint32_t width, uint32_t height,
         uint32_t format, uint64_t usage, C2Allocator::id_t allocatorId)
     : C2GraphicAllocation(width, height), mBase(nullptr),
-    mMapSize(0), mAllocatorId(allocatorId)
+    mMapSize(0), mAllocatorId(allocatorId), mAllocSize(0)
 {
     if (!gbm) {
         ALOGE("Invalid gbm device");
@@ -159,6 +159,7 @@ bool C2AllocationGBM::Alloc(struct gbm_device *gbm, uint32_t w, uint32_t h, uint
     }
 
     mBo = bo;
+    mAllocSize = bo->size;
 
     mHandle = new C2HandleGBM();
     mHandle->version = C2HandleGBM::VERSION;
@@ -238,6 +239,10 @@ id_t C2AllocationGBM::getAllocatorId() const
 bool C2AllocationGBM::equals(const std::shared_ptr<const C2GraphicAllocation> &other) const
 {
     return other && other->handle() == handle();
+}
+
+uint32_t C2AllocationGBM::allocSize() const {
+    return mAllocSize;
 }
 
 C2AllocatorGBM::C2AllocatorGBM(id_t id)

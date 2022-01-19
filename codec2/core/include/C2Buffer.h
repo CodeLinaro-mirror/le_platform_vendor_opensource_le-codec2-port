@@ -765,6 +765,11 @@ public:
      */
     virtual bool equals(const std::shared_ptr<C2LinearAllocation> &other) const = 0;
 
+    /**
+     * Returns size of the allocation.
+     */
+    virtual uint32_t allocSize() const { return 0; }
+
 protected:
     // \todo should we limit allocation directly?
     C2LinearAllocation(size_t capacity) : _C2LinearCapacityAspect(c2_min(capacity, UINT32_MAX)) {}
@@ -774,6 +779,7 @@ protected:
 class C2CircularBlock;
 class C2LinearBlock;
 class C2GraphicBlock;
+class AllocBasicParams;
 
 /**
  *  Block pools are used by components to obtain output buffers in an efficient way. They can
@@ -822,6 +828,32 @@ public:
      * \return the ID of the backing allocator of this block pool.
      */
     virtual C2Allocator::id_t getAllocatorId() const = 0;
+
+    /**
+     * Returns the ID of pool type.
+     *
+     * This method MUST be "non-blocking" and return within 1ms.
+     *
+     * \return the ID of the backing pool type.
+     */
+    virtual uint32_t getPoolType() const {
+        return C2Allocator::BAD_ID;
+    }
+
+    /**
+     * Initialize pool upfront with params and poolCapacity.
+     *
+     * This method MUST be "non-blocking" and return within 1ms.
+     *
+     * \param capacity the size of requested block.
+     * \param c2Params configure Linear/Graphic params.
+     *
+     * \retval C2_OK        the operation was successful
+     */
+    virtual c2_status_t init(
+            const AllocBasicParams &c2Params, uint32_t capacity) {
+        return C2_OK;
+    }
 
     /**
      * Obtains a linear writeable block of given |capacity| and |usage|. If successful, the
@@ -1664,6 +1696,11 @@ public:
      */
     virtual bool equals(const std::shared_ptr<const C2GraphicAllocation> &other) const = 0;
 
+    /**
+     * Returns size of the allocation.
+     */
+    virtual uint32_t allocSize() const { return 0; }
+
 protected:
     using _C2PlanarCapacityAspect::_C2PlanarCapacityAspect;
     virtual ~C2GraphicAllocation() = default;
@@ -2103,6 +2140,38 @@ private:
     C2Param::Index mIndex;
     C2BufferData mData;
     explicit C2InfoBuffer(C2Param::Index index, const C2BufferData &data);
+};
+
+class AllocBasicParams {
+public:
+    AllocBasicParams();
+
+    AllocBasicParams(C2MemoryUsage usage, uint32_t size);
+
+    AllocBasicParams(
+        C2MemoryUsage usage,
+        uint32_t width, uint32_t height, uint32_t format);
+
+    virtual ~AllocBasicParams() = default;
+
+private:
+    static constexpr int kMaxIntParams = 5; // large enough number;
+
+    enum AllocType : uint8_t {
+        ALLOC_NONE = 0,
+
+        ALLOC_LINEAR,
+        ALLOC_GRAPHIC,
+    };
+
+    struct {
+        AllocType allocType;
+        C2MemoryUsage usage;
+        uint32_t params[kMaxIntParams];
+    } data;
+
+    friend class C2PoolAllocator;
+    friend class C2CustomBlockPool;
 };
 
 /// @}

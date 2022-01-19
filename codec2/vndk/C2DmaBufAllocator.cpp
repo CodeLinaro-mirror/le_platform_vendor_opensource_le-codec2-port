@@ -109,6 +109,7 @@ class C2DmaBufAllocation : public C2LinearAllocation {
     virtual const C2Handle* handle() const override;
     virtual id_t getAllocatorId() const override;
     virtual bool equals(const std::shared_ptr<C2LinearAllocation>& other) const override;
+    virtual uint32_t allocSize() const override;
 
     // internal methods
 
@@ -154,6 +155,7 @@ class C2DmaBufAllocation : public C2LinearAllocation {
     }
 
     C2Allocator::id_t mId;
+    uint32_t mAllocSize;
     C2HandleBuf mHandle;
     c2_status_t mInit;
     struct Mapping {
@@ -248,6 +250,10 @@ bool C2DmaBufAllocation::equals(const std::shared_ptr<C2LinearAllocation>& other
     return mHandle.bufferFd() == otherAsBuf->mHandle.bufferFd();
 }
 
+uint32_t C2DmaBufAllocation::allocSize() const {
+    return mAllocSize;
+}
+
 const C2Handle* C2DmaBufAllocation::handle() const {
     return &mHandle;
 }
@@ -267,7 +273,7 @@ C2DmaBufAllocation::~C2DmaBufAllocation() {
 
 C2DmaBufAllocation::C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize, size_t capacity,
                                        C2String heap_name, unsigned flags, C2Allocator::id_t id)
-    : C2LinearAllocation(capacity), mHandle(-1, 0) {
+    : C2LinearAllocation(capacity), mHandle(-1, 0), mAllocSize(0) {
     int bufferFd = -1;
     int ret = 0;
 
@@ -278,6 +284,7 @@ C2DmaBufAllocation::C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize,
 
     // this may be a non-working handle if bufferFd is negative
     mHandle = C2HandleBuf(bufferFd, capacity);
+    mAllocSize = allocSize;
     mId = id;
     mInit = c2_status_t(c2_map_errno<ENOMEM, EACCES, EINVAL>(ret));
 }
@@ -285,6 +292,7 @@ C2DmaBufAllocation::C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize,
 C2DmaBufAllocation::C2DmaBufAllocation(size_t size, int shareFd, C2Allocator::id_t id)
     : C2LinearAllocation(size), mHandle(-1, 0) {
     mHandle = C2HandleBuf(shareFd, size);
+    mAllocSize = size;
     mId = id;
     mInit = c2_status_t(c2_map_errno<ENOMEM, EACCES, EINVAL>(0));
 }

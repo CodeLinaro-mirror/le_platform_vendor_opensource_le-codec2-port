@@ -36,10 +36,6 @@ protected:
     virtual ~_C2BlockPoolData() = default;
 };
 
-struct C2BufferQueueBlockPoolData;
-
-class C2SurfaceSyncMemory;
-
 /**
  * Internal only interface for creating blocks by block pool/buffer passing implementations.
  *
@@ -64,6 +60,20 @@ struct _C2BlockFactory {
             size_t size = ~(size_t)0);
 
     /**
+     * Create a linear block from an allocation for an allotted range.
+     *
+     * \param alloc parent allocation
+     * \param deleter destroys allocated block
+     *
+     * \return shared pointer to the linear block. nullptr if there was not enough memory to
+     *         create this block.
+     */
+    static
+    std::shared_ptr<C2LinearBlock> CreateLinearBlock(
+            const std::shared_ptr<C2LinearAllocation> &alloc,
+            std::function<void(C2LinearBlock*)> deleter);
+
+    /**
      * Create a graphic block from an allocation for an allotted section.
      *
      * \param alloc parent allocation
@@ -77,7 +87,20 @@ struct _C2BlockFactory {
     std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
             const std::shared_ptr<C2GraphicAllocation> &alloc,
             const C2Rect &allottedCrop = C2Rect(~0u, ~0u));
-};
 
+    /**
+     * Create a graphic block from an allocation for an allotted section.
+     *
+     * \param alloc parent allocation
+     * \param deleter destroys allocated block
+     *
+     * \return shared pointer to the graphic block. nullptr if there was not enough memory to
+     *         create this block.
+     */
+    static
+    std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
+            const std::shared_ptr<C2GraphicAllocation> &alloc,
+            std::function<void(C2GraphicBlock*)> deleter);
+};
 #endif // ANDROID_STAGEFRIGHT_C2BLOCK_INTERNAL_H_
 

@@ -282,7 +282,89 @@ private:
             delete pool;
         };
         switch(allocatorId) {
-            case C2PlatformAllocatorStore::DMABUFHEAP:
+            case C2AllocatorStore::DEFAULT_LINEAR:
+                res = allocatorStore->fetchAllocator(
+                        C2PlatformAllocatorStore::DMABUFHEAP, &allocator);
+                if (res == C2_OK) {
+                    std::shared_ptr<C2BlockPool> ptr(
+                            new C2BasicBlockPool(allocator, allocatorId, poolId),
+                            deleter);
+                    *pool = ptr;
+                    mBlockPools[poolId] = ptr;
+                    mComponents[poolId].insert(
+                           mComponents[poolId].end(),
+                           components.begin(), components.end());
+                }
+                break;
+            case C2AllocatorStore::DEFAULT_GRAPHIC:
+                res = allocatorStore->fetchAllocator(
+                        C2PlatformAllocatorStore::GBMBUFHEAP, &allocator);
+                if (res == C2_OK) {
+                    std::shared_ptr<C2BlockPool> ptr(
+                            new C2BasicBlockPool(allocator, allocatorId, poolId),
+                            deleter);
+                    *pool = ptr;
+                    mBlockPools[poolId] = ptr;
+                    mComponents[poolId].insert(
+                           mComponents[poolId].end(),
+                           components.begin(), components.end());
+                }
+                break;
+            case C2AllocatorStore::LINEAR_CONTIGIOUS:
+                res = allocatorStore->fetchAllocator(
+                        C2PlatformAllocatorStore::DMABUFHEAP, &allocator);
+                if (res == C2_OK) {
+                    std::shared_ptr<C2BlockPool> ptr(
+                            new C2CustomBlockPool(allocator, allocatorId, poolId, true),
+                            deleter);
+                    *pool = ptr;
+                    mBlockPools[poolId] = ptr;
+                    mComponents[poolId].insert(
+                           mComponents[poolId].end(),
+                           components.begin(), components.end());
+                }
+                break;
+            case C2AllocatorStore::LINEAR_NON_CONTIGIOUS:
+                res = allocatorStore->fetchAllocator(
+                        C2PlatformAllocatorStore::DMABUFHEAP, &allocator);
+                if (res == C2_OK) {
+                    std::shared_ptr<C2BlockPool> ptr(
+                            new C2CustomBlockPool(allocator, allocatorId, poolId, false),
+                            deleter);
+                    *pool = ptr;
+                    mBlockPools[poolId] = ptr;
+                    mComponents[poolId].insert(
+                           mComponents[poolId].end(),
+                           components.begin(), components.end());
+                }
+                break;
+            case C2AllocatorStore::GRAPHIC_CONTIGIOUS:
+                res = allocatorStore->fetchAllocator(
+                        C2PlatformAllocatorStore::GBMBUFHEAP, &allocator);
+                if (res == C2_OK) {
+                    std::shared_ptr<C2BlockPool> ptr(
+                            new C2CustomBlockPool(allocator, allocatorId, poolId, true),
+                            deleter);
+                    *pool = ptr;
+                    mBlockPools[poolId] = ptr;
+                    mComponents[poolId].insert(
+                           mComponents[poolId].end(),
+                           components.begin(), components.end());
+                }
+                break;
+            case C2AllocatorStore::GRAPHIC_NON_CONTIGIOUS:
+                res = allocatorStore->fetchAllocator(
+                        C2PlatformAllocatorStore::GBMBUFHEAP, &allocator);
+                if (res == C2_OK) {
+                    std::shared_ptr<C2BlockPool> ptr(
+                            new C2CustomBlockPool(allocator, allocatorId, poolId, false),
+                            deleter);
+                    *pool = ptr;
+                    mBlockPools[poolId] = ptr;
+                    mComponents[poolId].insert(
+                           mComponents[poolId].end(),
+                           components.begin(), components.end());
+                }
                 break;
             default:
                 break;
