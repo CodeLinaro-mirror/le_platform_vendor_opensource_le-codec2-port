@@ -113,8 +113,6 @@ namespace {
 
 std::mutex gDmaBufAllocatorMutex;
 std::weak_ptr<C2DmaBufAllocator> gDmaBufAllocator;
-std::mutex gGbmBufAllocatorMutex;
-std::weak_ptr<C2AllocatorGBM> gGbmBufAllocator;
 
 void UseComponentStoreForDmaBufAllocator(const std::shared_ptr<C2DmaBufAllocator> allocator,
                                          std::shared_ptr<C2ComponentStore> store) {
@@ -204,12 +202,14 @@ std::shared_ptr<C2Allocator> C2PlatformAllocatorStoreImpl::fetchDmaBufAllocator(
 }
 
 std::shared_ptr<C2Allocator> C2PlatformAllocatorStoreImpl::fetchGbmBufAllocator() {
-    std::lock_guard<std::mutex> lock(gGbmBufAllocatorMutex);
-    std::shared_ptr<C2AllocatorGBM> allocator = gGbmBufAllocator.lock();
-    if (allocator == nullptr) {
-        allocator = std::make_shared<C2AllocatorGBM>((uint32_t)C2PlatformAllocatorStore::GBMBUFHEAP);
-        gGbmBufAllocator = allocator;
+    std::shared_ptr<C2AllocatorGBM> allocator =
+        std::make_shared<C2AllocatorGBM>((uint32_t)C2PlatformAllocatorStore::GBMBUFHEAP);
+    c2_status_t ret = allocator->status();
+    if (ret != C2_OK) {
+        ALOGE("%s: failed\n", __func__);
+        return nullptr;
     }
+
     return allocator;
 }
 

@@ -82,6 +82,7 @@
 #include <memory>
 #include <mutex>
 #include <cstring>
+#include <limits.h>
 
 #include <cutils/memory.h>
 

@@ -411,6 +411,29 @@ AllocBasicParams::AllocBasicParams(
     uint32_t width, uint32_t height, uint32_t format)
     : data({ALLOC_GRAPHIC, usage, {width, height, format}}) {}
 
+C2BufferAllocation::C2BufferAllocation(
+    const native_handle_t *const handle, uint32_t size)
+    : mHandle(handle),
+      mAllocSize(size),
+      mUId(getUId(handle)) {}
+
+uint64_t C2BufferAllocation::getUId(const native_handle_t *const handle) {
+    struct stat buf;
+    int fd = -1, ret = 0;
+
+    if (handle && handle->numFds > 0) {
+        fd = handle->data[0];
+        ret = fstat(fd, &buf);
+        if (ret) {
+            ALOGE("%s: fstat failed. fd %d, ret %d\n", __func__, fd, ret);
+            return 0;
+        }
+
+        return buf.st_ino;
+    }
+    return 0;
+}
+
 InternalBuffer::InternalBuffer(
     const std::shared_ptr<C2LinearAllocation> &c2Linear,
     const std::shared_ptr<C2BufferStats> stats,
@@ -446,6 +469,10 @@ C2PoolAllocator::C2PoolAllocator(
     const std::shared_ptr<C2Allocator> &allocator,
     const std::shared_ptr<C2BufferStats> &stats)
     : mAllocator(allocator), mStats(stats) {}
+
+void C2PoolAllocator::resetAllocIndex() {
+    return mAllocator->resetAllocIndex();
+}
 
 bool C2PoolAllocator::compatible(
     const AllocBasicParams &newAlloc,
@@ -717,6 +744,7 @@ c2_status_t C2CustomContigiousBufferManager::initialize(
     uint32_t bufferId;
     c2_status_t ret;
     mBuffers.clear();
+    mAllocator->resetAllocIndex();
     mStats->clearStats();
     for (size_t i = 0; i < capacity; ++i) {
         bufferId = mBuffers.size();
@@ -839,6 +867,7 @@ c2_status_t C2CustomNonContigiousBufferManager::initialize(
     std::lock_guard<std::mutex> lock(mLock);
     mFreeBuffers.clear();
     mBuffersInUse.clear();
+    mAllocator->resetAllocIndex();
     mStats->clearStats();
     mPoolCapacity = capacity;
     mInit = C2_OK;
@@ -1018,6 +1047,13 @@ public:
             return ret;
         }
 
+        /* check is it valid handle or not */
+        bool isValidHandle = mAllocator->checkHandle(origHandle);
+        if (!isValidHandle) {
+            ALOGE("[%s] %s: invalid handle\n", mName, __func__);
+            return C2_CORRUPTED;
+        }
+
         /* clone nativehandle */
         cHandle = native_handle_clone(origHandle);
 
@@ -1060,6 +1096,13 @@ public:
         if (ret != C2_OK) {
             mStats->printStats();
             return ret;
+        }
+
+        /* check is it valid handle or not */
+        bool isValidHandle = mAllocator->checkHandle(origHandle);
+        if (!isValidHandle) {
+            ALOGE("[%s] %s: invalid handle\n", mName, __func__);
+            return C2_CORRUPTED;
         }
 
         /* clone nativehandle */
@@ -1370,6 +1413,13 @@ public:
             return ret;
         }
 
+        /* check is it valid handle or not */
+        bool isValidHandle = mAllocator->checkHandle(origHandle);
+        if (!isValidHandle) {
+            ALOGE("[%s] %s: invalid handle\n", mName, __func__);
+            return C2_CORRUPTED;
+        }
+
         /* clone nativehandle */
         cHandle = native_handle_clone(origHandle);
 
@@ -1439,6 +1489,13 @@ public:
         if (ret != C2_OK) {
             mStats->printStats();
             return ret;
+        }
+
+        /* check is it valid handle or not */
+        bool isValidHandle = mAllocator->checkHandle(origHandle);
+        if (!isValidHandle) {
+            ALOGE("[%s] %s: invalid handle\n", mName, __func__);
+            return C2_CORRUPTED;
         }
 
         /* clone nativehandle */

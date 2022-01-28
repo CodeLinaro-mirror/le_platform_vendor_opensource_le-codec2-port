@@ -62,6 +62,7 @@
 
 // #define LOG_NDEBUG 0
 #include <C2AllocatorGBM.h>
+#include <C2ErrnoUtils.h>
 #include <C2Debug.h>
 #include <C2Buffer.h>
 #include <sys/mman.h>
@@ -72,298 +73,526 @@
 
 namespace android {
 
-const ExtraData* C2HandleGBM::getExtraData(const C2Handle *const handle) {
-    if (handle == nullptr || handle->numInts < NUM_INTS) {
+/* ===================================== GBM ALLOCATION ==================================== */
+bool native_handle_is_invalid(const native_handle_t *const handle) {
+    // perform basic validation of a native handle
+    if (handle == nullptr) {
+        return true;
+    }
+    return ((size_t)handle->version != sizeof(native_handle_t) ||
+            handle->numFds < 0 ||
+            handle->numInts < 0 ||
+            // for sanity assume handles must occupy less memory than INT_MAX bytes
+            handle->numFds > int((INT_MAX - handle->version) / sizeof(int)) - handle->numInts);
+}
+
+const C2HandleGBM::ExtraData* C2HandleGBM::GetExtraData(const C2Handle *const handle) {
+    if (handle == nullptr
+            || native_handle_is_invalid(handle)
+            || handle->numInts < NUM_INTS) {
         return nullptr;
     }
-    const C2HandleGBM *gbmHandle = reinterpret_cast<const C2HandleGBM *>(handle);
+    return reinterpret_cast<const C2HandleGBM::ExtraData*>(
+            &handle->data[handle->numFds + handle->numInts - NUM_INTS]);
+}
 
-    return &gbmHandle->mInts;
+C2HandleGBM::ExtraData *C2HandleGBM::GetExtraData(C2Handle *const handle) {
+    return const_cast<C2HandleGBM::ExtraData *>(GetExtraData(const_cast<const C2Handle *const>(handle)));
+}
+
+bool C2HandleGBM::IsValid(const C2Handle *const o) {
+    if (o == nullptr) {
+        return false;
+    }
+    const ExtraData *xd = GetExtraData(o);
+    // we cannot validate width/height/format/usage without accessing gbm driver
+    return xd != nullptr && xd->magic == MAGIC;
+}
+
+int C2HandleGBM::bufferFd(const C2Handle *const handle) {
+    if (!IsValid(handle)) {
+        return -1;
+    }
+
+    return handle->data[0];
+}
+
+int C2HandleGBM::metaFd(const C2Handle *const handle) {
+    if (!IsValid(handle)) {
+        return -1;
+    }
+
+    return handle->data[1];
+}
+
+uint32_t C2HandleGBM::bufferSize(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->size;
+}
+
+uint32_t C2HandleGBM::width(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->width;
+}
+
+uint32_t C2HandleGBM::height(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->height;
+}
+
+uint32_t C2HandleGBM::format(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->format;
+}
+
+uint64_t C2HandleGBM::usage(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return (uint64_t(GetExtraData(o)->usageHi) << 32) | GetExtraData(o)->usageLo;
+}
+
+uint32_t C2HandleGBM::stride(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->stride;
+}
+
+uint32_t C2HandleGBM::sliceHeight(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->sliceHeight;
+}
+
+uint64_t C2HandleGBM::uId(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return (uint64_t(GetExtraData(o)->uIdHi) << 32) | GetExtraData(o)->uIdLo;
+}
+
+uint32_t C2HandleGBM::index(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->index;
+}
+
+uint64_t C2HandleGBM::getUId(const native_handle_t *const handle) {
+    struct stat buf;
+    int fd = -1, ret = 0;
+
+    if (handle && handle->numFds > 0) {
+        fd = handle->data[0];
+        ret = fstat(fd, &buf);
+        if (ret) {
+            ALOGE("%s: fstat failed. fd %d, ret %d\n", __func__, fd, ret);
+            return 0;
+        }
+
+        return buf.st_ino;
+    }
+    return 0;
+}
+
+C2HandleGBM* C2HandleGBM::wrapAndMoveNativeHandle(
+        uint32_t format, uint64_t flags, uint32_t index,
+        const struct gbm_bo *const bufferObj,
+        const native_handle_t *const cHandle) {
+    uint32_t width, height, usageLo, usageHi, stride, sliceHeight, size, uIdLo, uIdHi;
+    uint64_t uId;
+
+    if (native_handle_is_invalid(cHandle) ||
+        cHandle->numInts > int((INT_MAX - cHandle->version) / sizeof(int)) - NUM_INTS - cHandle->numFds) {
+        ALOGE("%s: invalid handle\n", __func__);
+        return nullptr;
+    }
+
+    width = bufferObj->width;
+    height = bufferObj->height;
+    format = format;
+    usageLo = uint32_t(flags & 0xFFFFFFFF);
+    usageHi = uint32_t(flags >> 32);
+    stride = bufferObj->stride;
+    sliceHeight = bufferObj->aligned_height;
+    size = bufferObj->size;
+    uId = getUId(cHandle);
+    uIdLo = uint32_t(uId & 0xFFFFFFFF);
+    uIdHi = uint32_t(uId >> 32);
+
+    ExtraData xd = {
+        width, height, format, usageLo, usageHi,
+        stride, sliceHeight, size, uIdLo, uIdHi, index, MAGIC
+    };
+    native_handle_t *res = native_handle_create(cHandle->numFds, cHandle->numInts + NUM_INTS);
+    if (res == nullptr) {
+        ALOGE("%s: native handle create failed\n", __func__);
+        return nullptr;
+    }
+    /* copy contents from raw handle to GBM handle */
+    memcpy(&res->data, &cHandle->data, sizeof(int) * (cHandle->numFds + cHandle->numInts));
+    *GetExtraData(res) = xd;
+
+    /* free cloned handle */
+    native_handle_delete(
+            const_cast<native_handle_t *>(reinterpret_cast<const native_handle_t *>(cHandle)));
+
+    return reinterpret_cast<C2HandleGBM *>(res);
 }
 
 const C2HandleGBM* C2HandleGBM::Import(
         const C2Handle *const handle,
-        uint32_t *width, uint32_t *height, uint32_t *format,
-        uint64_t *usage, uint32_t *stride, uint32_t *size)
-{
-    const ExtraData *xd = getExtraData(handle);
+        uint32_t *width, uint32_t *height) {
+    const ExtraData *xd = GetExtraData(handle);
     if (xd == nullptr) {
         return nullptr;
     }
-
-    *width  = xd->width;
+    *width = xd->width;
     *height = xd->height;
-    *format = xd->format;
-    *usage  = xd->usage_lo | (uint64_t(xd->usage_hi) << 32);
-    *stride = xd->stride;
-    *size   = xd->size;
-
     return reinterpret_cast<const C2HandleGBM *>(handle);
 }
 
-
-C2AllocationGBM::C2AllocationGBM(struct gbm_device *gbm, uint32_t width, uint32_t height,
-        uint32_t format, uint64_t usage, C2Allocator::id_t allocatorId)
-    : C2GraphicAllocation(width, height), mBase(nullptr),
-    mMapSize(0), mAllocatorId(allocatorId), mAllocSize(0)
-{
-    if (!gbm) {
-        ALOGE("Invalid gbm device");
-    } else {
-        Alloc(gbm, width, height, format, usage);
-    }
+C2AllocationGBM::C2AllocationGBM(
+          uint32_t width, uint32_t height,
+          const struct gbm_bo *bufferObj,
+          const C2HandleGBM *const handle,
+          C2Allocator::id_t allocatorId)
+    : C2GraphicAllocation(width, height),
+      mBufferObj(bufferObj),
+      mHandle(handle),
+      mAllocatorId(allocatorId),
+      mAllocSize(C2HandleGBM::bufferSize(handle)) {
 }
 
-C2AllocationGBM::~C2AllocationGBM()
-{
-    if(mBo) {
-        gbm_bo_destroy(mBo);
-        mBo = nullptr;
-        delete mHandle;
+C2AllocationGBM::~C2AllocationGBM() {
+    if (!mMappings.empty()) {
+        ALOGD("Dangling mappings!\n");
+        for (const Mapping& map : mMappings) {
+            int err = munmap(map.addr, map.size);
+            if (err) ALOGE("munmap failed\n");
+        }
+    }
+
+    if (mBufferObj) {
+        gbm_bo_destroy(const_cast<struct gbm_bo*>(mBufferObj));
+        mBufferObj = nullptr;
+    } else {
+        native_handle_close(mHandle);
+    }
+    if (mHandle) {
+        native_handle_delete(
+                const_cast<native_handle_t *>(reinterpret_cast<const native_handle_t *>(mHandle)));
         mHandle = nullptr;
     }
 }
 
-bool C2AllocationGBM::Alloc(struct gbm_device *gbm, uint32_t w, uint32_t h, uint32_t format, int flag)
-{
-    uint32_t flags = flag | GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING;
-    struct gbm_bo *bo = NULL;
-    int bo_fd = -1, meta_fd = -1;
-
-    ALOGV("creating gbm_bo with width:%d, height:%d foramt:%x, flag:%d", w, h, format, flag);
-
-    bo = gbm_bo_create(gbm, w, h, format, flags);
-
-    if (bo == NULL) {
-        ALOGE("no supported gbm bo for format %x", format);
-        gbm_device_destroy(gbm);
-        return false;
+c2_status_t C2AllocationGBM::map(
+        C2Rect c2Rect, C2MemoryUsage usage, C2Fence *fence,
+        C2PlanarLayout *layout /* nonnull */, uint8_t **addr /* nonnull */) {
+    (void)c2Rect;
+    (void)fence;
+    void *base;
+    c2_status_t err = C2_OK;
+    *addr = nullptr;
+    if (!mMappings.empty()) {
+        ALOGE("%s: multiple map request\n", __func__);
     }
 
-    //bo_fd = gbm_bo_get_fd(bo);
-    //TODO: use gbm_bo_get_fd
-    bo_fd = bo->ion_fd;
-    if (bo_fd < 0) {
-        ALOGE("Get bo fd failed");
-        gbm_bo_destroy(bo);
-        gbm_device_destroy(gbm);
-        return false;
+    int prot = PROT_NONE;
+    int flags = MAP_SHARED;
+    if (usage.expected & C2MemoryUsage::CPU_READ) {
+        prot |= PROT_READ;
+    }
+    if (usage.expected & C2MemoryUsage::CPU_WRITE) {
+        prot |= PROT_WRITE;
     }
 
-    gbm_perform(GBM_PERFORM_GET_METADATA_ION_FD, bo, &meta_fd);
-    if (meta_fd < 0) {
-        ALOGE("Get bo meta fd failed");
-        gbm_bo_destroy(bo);
-        gbm_device_destroy(gbm);
-        return false;
-    }
+    size_t mapSize = C2HandleGBM::bufferSize(mHandle);
+    int fd = C2HandleGBM::bufferFd(mHandle);
+    size_t mapOffset = 0;
 
-    mBo = bo;
-    mAllocSize = bo->size;
-
-    mHandle = new C2HandleGBM();
-    mHandle->version = C2HandleGBM::VERSION;
-    mHandle->numFds = C2HandleGBM::NUM_FDS;
-    mHandle->numInts = C2HandleGBM::NUM_INTS;
-    mHandle->mFds.buffer_fd = bo_fd;
-    mHandle->mFds.meta_buffer_fd = meta_fd;
-
-    mHandle->mInts.width = bo->width;
-    mHandle->mInts.height = bo->height;
-    mHandle->mInts.stride = bo->stride;
-    mHandle->mInts.slice_height =  bo->aligned_height;
-    mHandle->mInts.format = format;
-    mHandle->mInts.usage_lo = flags;
-    mHandle->mInts.size = bo->size;
-    //Use fd as the unique buffer id for C2Buffer
-    mHandle->mInts.id = bo_fd;
-
-    ALOGV("GBM handle data: fd:%d meta_fd:%d width:%u height:%u format:%u usage_lo:%u "
-          "usage_hi:%u stride:%u slice_height:%u size:%u",
-            mHandle->data[0], mHandle->data[1], mHandle->data[2], mHandle->data[3],
-            mHandle->data[4], mHandle->data[5], mHandle->data[6], mHandle->data[7],
-            mHandle->data[8], mHandle->data[9]);
-
-    ALOGV("created gbm bo fd meta_fd size width height %p %d %d %d %d %d",
-            bo, bo_fd, meta_fd, bo->size, bo->width, bo->height);
-
-    return true;
-}
-
-c2_status_t C2AllocationGBM::map(C2Rect rect, C2MemoryUsage usage,
-        C2Fence *fence, C2PlanarLayout *layout, uint8_t **addr)
-{
-    int fd = mHandle->mFds.buffer_fd;
-    int size = mHandle->mInts.size;
-
-    mBase = mmap(NULL, size, PROT_READ|PROT_WRITE,
-            MAP_SHARED, fd, 0);
-    if (mBase == MAP_FAILED) {
-        ALOGE("failed to mmap shmem object, errno = %d", errno);
-        return C2_BAD_VALUE;
-    }
-
-    *addr = (uint8_t*) mBase;
-    ALOGV("mapping gbm fd: %d, size: %d addr:%p", fd, size, *addr);
-    mMapSize = size;
-
-    return C2_OK;
-}
-
-c2_status_t C2AllocationGBM::unmap(uint8_t **addr, C2Rect rect, C2Fence *fence)
-{
-    int ret = munmap(mBase, mMapSize);
-    ALOGV("unmap gbm buffer addr:%p size:%zu", mBase, mMapSize);
-
-    if (ret) {
-        ALOGE("failed to ummap shmem object, errno = %d", errno);
-        return C2_BAD_VALUE;
+    base = mmap(nullptr, mapSize, prot, flags, fd, mapOffset);
+    if (base == MAP_FAILED) {
+        ALOGE("nmap failed. fd %d, size %zu, ret %d\n", fd, mapSize, errno);
+        *addr = nullptr;
+        err = c2_map_errno<EINVAL>(errno);
     } else {
-        mBase = NULL;
-        mMapSize = 0;
+        ALOGV("successfully mapped: addr %p, size %zu, prot = %d, flags = %d, mapFd = %d\n",
+                *addr, mapSize, prot, flags, fd);
+        *addr = (uint8_t*)base;
+        mMappings.push_back({base, mapSize});
     }
 
-    return C2_OK;
+    return err;
 }
 
-const C2Handle *C2AllocationGBM::handle() const
-{
-    return reinterpret_cast<const C2Handle*>(mHandle);
+c2_status_t C2AllocationGBM::unmap(
+        uint8_t **addr, C2Rect rect, C2Fence *fence /* nullable */) {
+    (void)rect;
+    (void)fence;
+    if (mMappings.empty()) {
+        ALOGD("tried to unmap unmapped buffer");
+        return C2_NOT_FOUND;
+    }
+    for (auto it = mMappings.begin(); it != mMappings.end(); ++it) {
+        if (*addr != (uint8_t*)it->addr) {
+            continue;
+        }
+        int err = munmap(it->addr, it->size);
+        if (err != 0) {
+            ALOGE("munmap failed. addr %p, size %zu, ret %d\n", it->addr, it->size, errno);
+            return c2_map_errno<EINVAL>(errno);
+        }
+        if (fence) {
+            *fence = C2Fence();  // not using fences
+        }
+        (void)mMappings.erase(it);
+        ALOGV("successfully unmapped: addr %p, size %zu", it->addr, it->size);
+        return C2_OK;
+    }
+    ALOGD("unmap failed to find specified map");
+    return C2_BAD_VALUE;
 }
 
-id_t C2AllocationGBM::getAllocatorId() const
-{
-    return mAllocatorId;
-}
-
-bool C2AllocationGBM::equals(const std::shared_ptr<const C2GraphicAllocation> &other) const
-{
+bool C2AllocationGBM::equals(const std::shared_ptr<const C2GraphicAllocation> &other) const {
     return other && other->handle() == handle();
 }
 
-uint32_t C2AllocationGBM::allocSize() const {
-    return mAllocSize;
-}
+/* ===================================== GBM ALLOCATOR ==================================== */
+class C2AllocatorGBM::Impl {
+public:
+    explicit Impl(id_t id)
+        : mInit(C2_NO_INIT),
+          mAllocationIndex(0) {
+        C2MemoryUsage minUsage = { 0, 0 };
+        C2MemoryUsage maxUsage = { C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE };
+        Traits traits = { "linux.allocator.gbm", id, C2Allocator::GRAPHIC, minUsage, maxUsage };
+        mTraits = std::make_shared<C2Allocator::Traits>(traits);
+
+        mDriverFd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+        if (mDriverFd < 0) {
+            ALOGE("%s: opening dri device node failed\n", __func__);
+            return;
+        }
+        mGBM = gbm_create_device(mDriverFd);
+        if (mGBM == nullptr) {
+            ALOGE("%s: gbm create device failed\n", __func__);
+            close(mDriverFd);
+            mDriverFd = -1;
+            return;
+        }
+        mInit = C2_OK;
+    }
+
+    virtual ~Impl() {
+        if (mGBM != nullptr) {
+            gbm_device_destroy(mGBM);
+            mGBM = nullptr;
+        }
+
+        if (mDriverFd != -1) {
+            close(mDriverFd);
+            mDriverFd = -1;
+        }
+        mInit = C2_NO_INIT;
+    }
+
+    id_t getId() const {
+        std::lock_guard<std::mutex> lock(mLock);
+        return mTraits->id;
+    }
+
+    C2String getName() const {
+        std::lock_guard<std::mutex> lock(mLock);
+        return mTraits->name;
+    }
+
+    std::shared_ptr<const C2Allocator::Traits> getTraits() const {
+        std::lock_guard<std::mutex> lock(mLock);
+        return mTraits;
+    }
+
+    c2_status_t status() const {
+        std::lock_guard<std::mutex> lock(mLock);
+        return mInit;
+    }
+
+    void resetAllocIndex() {
+        std::lock_guard<std::mutex> lock(mLock);
+        ALOGV("%s: %u -> 0\n", __func__, mAllocationIndex);
+        mAllocationIndex = 0;
+    }
+
+    c2_status_t allocateRawHandle_l(
+        uint32_t width, uint32_t height,
+        uint32_t format, uint64_t flags,
+        struct gbm_bo **bufferObj,
+        native_handle_t **handle) {
+        c2_status_t ret;
+        struct gbm_bo *bo;
+        int metaFd = -1;
+
+        *bufferObj = nullptr;
+        *handle = nullptr;
+
+        bo = gbm_bo_create(mGBM, width, height, format, flags);
+        if (bo == nullptr) {
+            ALOGE("%s: failed. width %u, height %u, format %#x, flags %#zx\n",
+                __func__, width, height, format, flags);
+            return C2_CORRUPTED;
+        }
+
+        gbm_perform(GBM_PERFORM_GET_METADATA_ION_FD, bo, &metaFd);
+
+        if (bo->ion_fd < 0 || metaFd < 0) {
+            ALOGE("%s: invalid fd. raw %d, meta %d\n", __func__, bo->ion_fd, metaFd);
+            gbm_bo_destroy(bo);
+            return C2_CORRUPTED;
+        }
+
+        native_handle_t *res = native_handle_create(2 /* raw + meta fd */, 0);
+        if (res == nullptr) {
+            ALOGE("%s: native handle alloc failed\n", __func__);
+            gbm_bo_destroy(bo);
+            return C2_CORRUPTED;
+        }
+        res->data[0] = bo->ion_fd;
+        res->data[1] = metaFd;
+        *bufferObj = bo;
+        *handle = res;
+
+        return C2_OK;
+    }
+
+    c2_status_t newGraphicAllocation(
+            uint32_t width, uint32_t height, uint32_t format, const C2MemoryUsage &usage,
+            std::shared_ptr<C2GraphicAllocation> *allocation) {
+        std::lock_guard<std::mutex> lock(mLock);
+        struct gbm_bo *bufferObj;
+        native_handle_t *handle;
+        uint64_t flags = usage.expected;
+
+        if (mInit != C2_OK) {
+            ALOGE("%s: gbm device not created\n", __func__);
+            return C2_NO_INIT;
+        }
+
+        c2_status_t ret = allocateRawHandle_l(width, height, format, flags, &bufferObj, &handle);
+        if (ret != C2_OK) {
+            ALOGE("%s: allocate raw handle failed\n", __func__);
+            return C2_CORRUPTED;
+        }
+
+        C2HandleGBM *gbmHandle = C2HandleGBM::wrapAndMoveNativeHandle(
+                format, flags, mAllocationIndex++, bufferObj, handle);
+        if (gbmHandle == nullptr) {
+            ALOGE("%s: wrap and move native handle failed\n", __func__);
+            return C2_CORRUPTED;
+        }
+
+        ALOGV("%s: fd %d, metaFd %d, width %u, height %u, format %#x, usage %#zx, "
+            "stride %u, sliceHeight %u, size %u, uId %zu, index %u\n", __func__,
+            gbmHandle->data[0], gbmHandle->data[1], gbmHandle->data[2], gbmHandle->data[3],
+            gbmHandle->data[4], (gbmHandle->data[5] | ((uint64_t)gbmHandle->data[6] << 32)),
+            gbmHandle->data[7], gbmHandle->data[8], gbmHandle->data[9], (gbmHandle->data[10] |
+            ((uint64_t)gbmHandle->data[11] << 32)), gbmHandle->data[12]);
+
+        allocation->reset(new C2AllocationGBM(
+                width, height, bufferObj, gbmHandle, mTraits->id));
+        return C2_OK;
+    }
+
+    c2_status_t priorGraphicAllocation(
+            const C2Handle *cHandle,
+            std::shared_ptr<C2GraphicAllocation> *allocation) {
+        std::lock_guard<std::mutex> lock(mLock);
+        uint32_t width;
+        uint32_t height;
+
+        if (mInit != C2_OK) {
+            ALOGE("%s: gbm device not created\n", __func__);
+            return C2_NO_INIT;
+        }
+
+        const C2HandleGBM *gbmHandle = C2HandleGBM::Import(
+                cHandle, &width, &height);
+        if (gbmHandle == nullptr) {
+            ALOGE("%s: import gbmHandle failed\n", __func__);
+            return C2_CORRUPTED;
+        }
+
+        ALOGV("%s: fd %d, metaFd %d, width %u, height %u, format %#x, usage %#zx, "
+            "stride %u, sliceHeight %u, size %u, uId %zu, index %u\n", __func__,
+            gbmHandle->data[0], gbmHandle->data[1], gbmHandle->data[2], gbmHandle->data[3],
+            gbmHandle->data[4], (gbmHandle->data[5] | ((uint64_t)gbmHandle->data[6] << 32)),
+            gbmHandle->data[7], gbmHandle->data[8], gbmHandle->data[9], (gbmHandle->data[10] |
+            ((uint64_t)gbmHandle->data[11] << 32)), gbmHandle->data[12]);
+
+        allocation->reset(new C2AllocationGBM(
+                width, height, nullptr, gbmHandle, mTraits->id));
+        return C2_OK;
+    }
+
+private:
+    std::shared_ptr<C2Allocator::Traits> mTraits;
+    c2_status_t mInit;
+    uint32_t mAllocationIndex;
+    mutable std::mutex mLock;
+    struct gbm_device *mGBM;
+    int mDriverFd;
+};
 
 C2AllocatorGBM::C2AllocatorGBM(id_t id)
-    : mInit(C2_NO_INIT),
-    mGBM(NULL),
-    mDevice_fd(-1)
-{
-    C2MemoryUsage minUsage = { 0, 0 };
-    C2MemoryUsage maxUsage = { C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE };
-    Traits traits = { "linux.allocator.gbm", id, GRAPHIC, minUsage, maxUsage };
-    mTraits = std::make_shared<Traits>(traits);
+    : mImpl(new Impl(id)) {}
 
-    mDevice_fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-
-    if (mDevice_fd < 0) {
-        ALOGE("opening dri device for gbm failed");
-    } else {
-        mGBM = gbm_create_device(mDevice_fd);
-        if (mGBM == NULL) {
-            ALOGE("create gbm device failed with fd: %d", mDevice_fd);
-        } else {
-            mInit = C2_OK;
-            ALOGV( "Successfully created gbm device: %p", mGBM);
-        }
-    }
+C2AllocatorGBM::~C2AllocatorGBM() {
 }
 
-C2AllocatorGBM::~C2AllocatorGBM()
-{
-    ALOGV( "destroy C2AllocatorGBM");
-    if (mGBM) {
-        gbm_device_destroy(mGBM);
-        mGBM = NULL;
-    }
-
-    if (mDevice_fd > 0) {
-        close(mDevice_fd);
-        mDevice_fd = -1;
-    }
-
-    mInit = C2_NO_INIT;
+C2Allocator::id_t C2AllocatorGBM::getId() const {
+    return mImpl->getId();
 }
 
-C2Allocator::id_t C2AllocatorGBM::getId() const
-{
-    return mTraits->id;
+C2String C2AllocatorGBM::getName() const {
+    return mImpl->getName();
 }
 
-C2String C2AllocatorGBM::getName() const
-{
-    return mTraits->name;
+std::shared_ptr<const C2Allocator::Traits> C2AllocatorGBM::getTraits() const {
+    return mImpl->getTraits();
 }
 
-std::shared_ptr<const C2Allocator::Traits> C2AllocatorGBM::getTraits() const
-{
-    return mTraits;
+void C2AllocatorGBM::resetAllocIndex() const {
+    return mImpl->resetAllocIndex();
 }
 
-c2_status_t C2AllocatorGBM::newGraphicAllocation( uint32_t width, uint32_t height,
-        uint32_t format, C2MemoryUsage usage,
-        std::shared_ptr<C2GraphicAllocation> *allocation)
-{
-    c2_status_t ret = C2_OK;
-
-    if (allocation == nullptr) {
-        return C2_BAD_VALUE;
-    }
-
-    if (mInit != C2_OK) {
-        ALOGE("GBM device is not created, unexpected");
-        return C2_NO_INIT;
-    }
-
-    std::shared_ptr<C2AllocationGBM> alloc
-        = std::make_shared<C2AllocationGBM>(mGBM, width, height, format, usage.expected, mTraits->id);
-    ret = alloc->status();
-
-    if (ret == C2_OK) {
-        *allocation = alloc;
-    }
-
-    return ret;
+c2_status_t C2AllocatorGBM::newGraphicAllocation(
+        uint32_t width, uint32_t height, uint32_t format, C2MemoryUsage usage,
+        std::shared_ptr<C2GraphicAllocation> *allocation) {
+    return mImpl->newGraphicAllocation(width, height, format, usage, allocation);
 }
 
 c2_status_t C2AllocatorGBM::priorGraphicAllocation(
-        const C2Handle *handle, std::shared_ptr<C2GraphicAllocation> *allocation)
-{
-    c2_status_t ret = C2_OK;
-    uint32_t width = 0;
-    uint32_t height = 0;
-    uint32_t format = 0;
-    uint64_t flags = 0;
-    uint32_t stride = 0;
-    uint32_t size = 0;
-
-    if (mInit != C2_OK) {
-        ALOGE("GBM device is not created, unexpected");
-        return C2_NO_INIT;
-    }
-
-    const C2HandleGBM *gbmHandle = C2HandleGBM::Import(handle, &width, &height, &format, &flags, &stride, &size);
-
-    if (gbmHandle) {
-        allocation->reset(new C2AllocationGBM(mGBM, width, height, format, flags, mTraits->id));
-    } else {
-        ret = C2_BAD_VALUE;
-        ALOGE("priorGraphicAllocation failed due to invalid handle");
-    }
-
-    return ret;
+        const C2Handle *handle,
+        std::shared_ptr<C2GraphicAllocation> *allocation) {
+    return mImpl->priorGraphicAllocation(handle, allocation);
 }
 
-bool C2AllocatorGBM::isValid(const C2Handle* const o) {
-    return true;
+c2_status_t C2AllocatorGBM::status() const {
+    return mImpl->status();
+}
+
+// static
+bool C2AllocatorGBM::CheckHandle(const C2Handle* const o) {
+    return C2HandleGBM::IsValid(o);
 }
 
 } // namespace android
-
-void _UnwrapNativeCodec2GBMMetadata(
-        const C2Handle *const handle,
-        uint32_t *width, uint32_t *height, uint32_t *format,uint64_t *usage, uint32_t *stride, uint32_t *size) {
-    (void)android::C2HandleGBM::Import(handle, width, height, format, usage, stride, size);
-}
-

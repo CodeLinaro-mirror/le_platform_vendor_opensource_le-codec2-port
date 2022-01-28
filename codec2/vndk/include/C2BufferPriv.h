@@ -105,10 +105,8 @@ private:
 
 class C2BufferAllocation {
 public:
-    C2BufferAllocation(const native_handle_t *const handle, uint32_t size)
-        : mHandle(handle),
-          mAllocSize(size),
-          mUId(getUId(handle)) {}
+    explicit C2BufferAllocation(
+        const native_handle_t *const handle, uint32_t size);
 
     virtual ~C2BufferAllocation() = default;
 
@@ -125,27 +123,11 @@ public:
     }
 
 private:
-    uint64_t getUId(const native_handle_t *const handle) {
-        struct stat buf;
-        int fd = -1, ret = 0;
-
-        if (handle && handle->numFds > 0) {
-            fd = handle->data[0];
-            ret = fstat(fd, &buf);
-            if (ret) {
-                ALOGE("%s: fstat failed. fd %d, ret %d\n", __func__, fd, ret);
-                return 0;
-            }
-
-            return buf.st_ino;
-        }
-        return 0;
-    }
-
-private:
     const native_handle_t *mHandle;
     const uint32_t mAllocSize;
     const uint64_t mUId;    // inode
+
+    uint64_t getUId(const native_handle_t *const handle);
 };
 
 class InternalBuffer {
@@ -188,6 +170,8 @@ public:
         const std::shared_ptr<C2BufferStats> &stats);
 
     virtual ~C2PoolAllocator() = default;
+
+    void resetAllocIndex();
 
     c2_status_t allocate(const AllocBasicParams &c2Params,
                           std::unique_ptr<InternalBuffer> *buf);

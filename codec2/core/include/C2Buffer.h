@@ -683,6 +683,11 @@ public:
      */
     virtual bool checkHandle(const C2Handle *const handle) const = 0;
 
+    /**
+     * Reset allocation index, when pool is reinited.
+     */
+    virtual void resetAllocIndex() const { return; }
+
 protected:
     C2Allocator() = default;
 };
