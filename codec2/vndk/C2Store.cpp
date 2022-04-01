@@ -310,7 +310,7 @@ private:
                            components.begin(), components.end());
                 }
                 break;
-            case C2AllocatorStore::LINEAR_CONTIGIOUS:
+            case C2AllocatorStore::LINEAR_CONTIGUOUS:
                 res = allocatorStore->fetchAllocator(
                         C2PlatformAllocatorStore::DMABUFHEAP, &allocator);
                 if (res == C2_OK) {
@@ -324,7 +324,7 @@ private:
                            components.begin(), components.end());
                 }
                 break;
-            case C2AllocatorStore::LINEAR_NON_CONTIGIOUS:
+            case C2AllocatorStore::LINEAR_NON_CONTIGUOUS:
                 res = allocatorStore->fetchAllocator(
                         C2PlatformAllocatorStore::DMABUFHEAP, &allocator);
                 if (res == C2_OK) {
@@ -338,7 +338,7 @@ private:
                            components.begin(), components.end());
                 }
                 break;
-            case C2AllocatorStore::GRAPHIC_CONTIGIOUS:
+            case C2AllocatorStore::GRAPHIC_CONTIGUOUS:
                 res = allocatorStore->fetchAllocator(
                         C2PlatformAllocatorStore::GBMBUFHEAP, &allocator);
                 if (res == C2_OK) {
@@ -352,7 +352,7 @@ private:
                            components.begin(), components.end());
                 }
                 break;
-            case C2AllocatorStore::GRAPHIC_NON_CONTIGIOUS:
+            case C2AllocatorStore::GRAPHIC_NON_CONTIGUOUS:
                 res = allocatorStore->fetchAllocator(
                         C2PlatformAllocatorStore::GBMBUFHEAP, &allocator);
                 if (res == C2_OK) {
