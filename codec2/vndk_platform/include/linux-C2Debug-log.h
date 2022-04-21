@@ -78,12 +78,12 @@
 #ifndef C2_LINUX_DEBUG_LOG_H_
 #define C2_LINUX_DEBUG_LOG_H_
 
+#include <utils/Log.h>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <cstring>
 #include <limits.h>
-
 #include <cutils/memory.h>
 
 #ifndef __unused
@@ -135,7 +135,7 @@
 /** Corresponds to the Android DEBUG log priority. */
 #define LOG_DEBUG 7
 
-#define ALOG(level, tag, ...) printf(tag, __VA_ARGS__)
+//#define ALOG(level, tag, ...) printf(tag, __VA_ARGS__)
 /*
  * Normally we strip ALOGV (VERBOSE messages) from release builds.
  * You can modify this (for example with "#define LOG_NDEBUG 0"
@@ -164,6 +164,7 @@
 /*
  * Simplified macro to send a verbose log message using the current LOG_TAG.
  */
+
 #ifndef ALOGV
 #if LOG_NDEBUG
 #define ALOGV(...)   ((void)0)
@@ -171,7 +172,6 @@
 #define ALOGV(...) ((void)ALOG(LOG_VERBOSE, LOG_TAG, __VA_ARGS__))
 #endif
 #endif
-
 #define CONDITION(cond)     (__builtin_expect((cond)!=0, 0))
 
 #ifndef ALOGV_IF
@@ -231,7 +231,8 @@
  * Simplified macro to send an error log message using the current LOG_TAG.
  */
 #ifndef ALOGE
-#define ALOGE(...) ((void)ALOG(LOG_ERROR, LOG_TAG, __VA_ARGS__))
+#define ALOGE(...) printf("Test logging from: %s line: %u\n", __func__, __LINE__); \
+    ((void)ALOG(LOG_ERROR, LOG_TAG, __VA_ARGS__))
 #endif
 
 #ifndef ALOGE_IF
