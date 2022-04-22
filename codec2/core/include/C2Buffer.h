@@ -686,7 +686,7 @@ public:
     /**
      * Reset allocation index, when pool is reinited.
      */
-    virtual void resetAllocIndex() const { return; }
+    virtual void resetAllocIndex() = 0;
 
 protected:
     C2Allocator() = default;

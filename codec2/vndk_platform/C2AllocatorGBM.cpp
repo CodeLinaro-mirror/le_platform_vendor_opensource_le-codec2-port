@@ -570,7 +570,7 @@ std::shared_ptr<const C2Allocator::Traits> C2AllocatorGBM::getTraits() const {
     return mImpl->getTraits();
 }
 
-void C2AllocatorGBM::resetAllocIndex() const {
+void C2AllocatorGBM::resetAllocIndex() {
     return mImpl->resetAllocIndex();
 }
 

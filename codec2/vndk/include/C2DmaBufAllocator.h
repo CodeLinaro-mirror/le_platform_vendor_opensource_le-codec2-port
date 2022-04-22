@@ -40,6 +40,8 @@ class C2DmaBufAllocator : public C2Allocator {
 
     C2DmaBufAllocator(id_t id);
 
+    virtual void resetAllocIndex() override;
+
     virtual c2_status_t status() const { return mInit; }
 
     virtual bool checkHandle(const C2Handle* const o) const override { return CheckHandle(o); }
@@ -106,6 +108,7 @@ class C2DmaBufAllocator : public C2Allocator {
     mutable std::mutex mUsageMapperLock;
     std::shared_ptr<const Traits> mTraits;
     size_t mBlockSize;
+    uint32_t mAllocationIndex;
     UsageMapperFn mUsageMapper;
     typedef std::pair<uint64_t, size_t> MapperKey;
     struct MapperKeyHash {
