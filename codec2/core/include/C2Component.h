@@ -720,10 +720,10 @@ public:
     enum : C2Allocator::id_t {
         DEFAULT_LINEAR,     ///< basic linear allocator type
         DEFAULT_GRAPHIC,    ///< basic graphic allocator type
-        LINEAR_CONTIGIOUS,      ///< linear allocator type(contigious)
-        LINEAR_NON_CONTIGIOUS,  ///< linear allocator type(non-contigious)
-        GRAPHIC_CONTIGIOUS,     ///< graphic allocator type(contigious)
-        GRAPHIC_NON_CONTIGIOUS, ///< graphic allocator type(non-contigious)
+        LINEAR_CONTIGUOUS,      ///< linear allocator type(contiguous)
+        LINEAR_NON_CONTIGUOUS,  ///< linear allocator type(non-contiguous)
+        GRAPHIC_CONTIGUOUS,     ///< graphic allocator type(contiguous)
+        GRAPHIC_NON_CONTIGUOUS, ///< graphic allocator type(non-contiguous)
         PLATFORM_START = 0x10,
         VENDOR_START   = 0x100,
         BAD_ID         = C2Allocator::BAD_ID, ///< DO NOT USE

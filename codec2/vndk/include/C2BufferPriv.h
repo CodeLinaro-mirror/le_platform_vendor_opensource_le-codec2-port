@@ -250,13 +250,13 @@ public:
     virtual c2_status_t shrink(size_t newSize) = 0;
 };
 
-class C2CustomContigiousBufferManager : public C2CustomBufferManager {
+class C2CustomContiguousBufferManager : public C2CustomBufferManager {
 public:
-    C2CustomContigiousBufferManager(
+    C2CustomContiguousBufferManager(
         const std::shared_ptr<C2Allocator> &allocator,
         const std::shared_ptr<C2BufferStats> stats, const char *name);
 
-    virtual ~C2CustomContigiousBufferManager() = default;
+    virtual ~C2CustomContiguousBufferManager() = default;
 
     virtual c2_status_t initialize(
             const AllocBasicParams &c2Params,
@@ -288,13 +288,13 @@ private:
     std::vector<Entry> mBuffers;
 };
 
-class C2CustomNonContigiousBufferManager : public C2CustomBufferManager {
+class C2CustomNonContiguousBufferManager : public C2CustomBufferManager {
 public:
-    C2CustomNonContigiousBufferManager(
+    C2CustomNonContiguousBufferManager(
         const std::shared_ptr<C2Allocator> &allocator,
         const std::shared_ptr<C2BufferStats> stats, const char *name);
 
-    virtual ~C2CustomNonContigiousBufferManager() = default;
+    virtual ~C2CustomNonContiguousBufferManager() = default;
 
     virtual c2_status_t initialize(
             const AllocBasicParams &c2Params,
@@ -369,7 +369,7 @@ private:
 class C2CustomBlockPool : public C2BlockPool {
 public:
     C2CustomBlockPool(const std::shared_ptr<C2Allocator> &allocator,
-        const uint32_t poolType, const local_id_t localId, const bool contigious);
+        const uint32_t poolType, const local_id_t localId, const bool contiguous);
 
     virtual ~C2CustomBlockPool() override;
 

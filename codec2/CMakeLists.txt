@@ -11,10 +11,11 @@ pkg_check_modules(LIBDMABUFHEAP libdmabufheap)
 
 # TODO add -Werror
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-error=deprecated-declarations -Wno-enum-compare -stdlib=libstdc++ \
-	-I/usr/include/drm \
-	-I/usr/include/c++/ \
-	-I/usr/include/c++/${TARGET_SYS} \
-	-I${CMAKE_INCLUDE_PATH} ")
+    -Wl --no-undefined \
+    -I/usr/include/drm \
+    -I/usr/include/c++/ \
+    -I/usr/include/c++/${TARGET_SYS} \
+    -I${CMAKE_INCLUDE_PATH} ")
 
 # Build debug version
 # set(CMAKE_BUILD_TYPE Debug)
@@ -54,7 +55,7 @@ set(CODEC2_VNDK_SOURCE
 #C2 platform vndk implementation
     vndk_platform/C2AllocatorGBM.cpp)
 add_library(codec2_vndk SHARED ${CODEC2_VNDK_SOURCE})
-target_link_libraries(codec2_vndk gbm dmabufheap cutils)
+target_link_libraries(codec2_vndk gbm dmabufheap dl log cutils)
 
 set(CODEC2_VNDK_LIBS
     codec2_vndk)

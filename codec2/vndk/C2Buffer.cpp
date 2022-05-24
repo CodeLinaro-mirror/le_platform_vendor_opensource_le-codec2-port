@@ -354,10 +354,10 @@ static std::string getPoolTypeString(const uint32_t poolType) {
     switch(poolType) {
         case C2AllocatorStore::DEFAULT_LINEAR:         return std::string("1D");
         case C2AllocatorStore::DEFAULT_GRAPHIC:        return std::string("2D");
-        case C2AllocatorStore::LINEAR_CONTIGIOUS:      return std::string("1D");
-        case C2AllocatorStore::LINEAR_NON_CONTIGIOUS:  return std::string("1D");
-        case C2AllocatorStore::GRAPHIC_CONTIGIOUS:     return std::string("2D");
-        case C2AllocatorStore::GRAPHIC_NON_CONTIGIOUS: return std::string("2D");
+        case C2AllocatorStore::LINEAR_CONTIGUOUS:      return std::string("1D");
+        case C2AllocatorStore::LINEAR_NON_CONTIGUOUS:  return std::string("1D");
+        case C2AllocatorStore::GRAPHIC_CONTIGUOUS:     return std::string("2D");
+        case C2AllocatorStore::GRAPHIC_NON_CONTIGUOUS: return std::string("2D");
     }
     return std::string("NA");
 }
@@ -727,7 +727,7 @@ void C2BasicBufferManager::returnHandle(uint64_t uId) {
     mStats->onBufferUnused(size);
 }
 
-C2CustomContigiousBufferManager::C2CustomContigiousBufferManager(
+C2CustomContiguousBufferManager::C2CustomContiguousBufferManager(
     const std::shared_ptr<C2Allocator> &allocator,
     const std::shared_ptr<C2BufferStats> stats, const char *name)
     : mInit(C2_NO_INIT),
@@ -737,7 +737,7 @@ C2CustomContigiousBufferManager::C2CustomContigiousBufferManager(
       mImplName(std::string(name) + ".CCBMImpl"),
       mName(mImplName.c_str()) {}
 
-c2_status_t C2CustomContigiousBufferManager::initialize(
+c2_status_t C2CustomContiguousBufferManager::initialize(
     const AllocBasicParams &params, uint32_t capacity) {
     std::lock_guard<std::mutex> lock(mLock);
     std::unique_ptr<InternalBuffer> buf;
@@ -761,7 +761,7 @@ c2_status_t C2CustomContigiousBufferManager::initialize(
     return C2_OK;
 }
 
-c2_status_t C2CustomContigiousBufferManager::grabHandle(
+c2_status_t C2CustomContiguousBufferManager::grabHandle(
     const AllocBasicParams &params, uint32_t *pId,
     uint64_t *uId, const native_handle_t** handle) {
     std::lock_guard<std::mutex> lock(mLock);
@@ -795,7 +795,7 @@ c2_status_t C2CustomContigiousBufferManager::grabHandle(
     return C2_TIMED_OUT;
 }
 
-void C2CustomContigiousBufferManager::returnHandle(uint32_t pId, uint64_t uId) {
+void C2CustomContiguousBufferManager::returnHandle(uint32_t pId, uint64_t uId) {
     std::lock_guard<std::mutex> lock(mLock);
     uint32_t size;
 
@@ -829,14 +829,14 @@ void C2CustomContigiousBufferManager::returnHandle(uint32_t pId, uint64_t uId) {
 }
 
 // not supported
-c2_status_t C2CustomContigiousBufferManager::grow(size_t newSize) {
-    ALOGE("[%s] %s: not supported for contigious pool\n",
+c2_status_t C2CustomContiguousBufferManager::grow(size_t newSize) {
+    ALOGE("[%s] %s: not supported for contiguous pool\n",
         mName, __func__);
 
     return C2_OK;
 }
 
-c2_status_t C2CustomContigiousBufferManager::shrink(size_t newSize) {
+c2_status_t C2CustomContiguousBufferManager::shrink(size_t newSize) {
     std::lock_guard<std::mutex> lock(mLock);
 
     if (mInit != C2_OK) {
@@ -844,7 +844,7 @@ c2_status_t C2CustomContigiousBufferManager::shrink(size_t newSize) {
         return mInit;
     }
 
-    ALOGV("[%s] %s: contigious pool %u -> %u\n",
+    ALOGV("[%s] %s: contiguous pool %u -> %u\n",
         mName, __func__, mBuffers.size(), newSize);
     while (mBuffers.size() > newSize) {
         mBuffers.pop_back();
@@ -852,7 +852,7 @@ c2_status_t C2CustomContigiousBufferManager::shrink(size_t newSize) {
     return C2_OK;
 }
 
-C2CustomNonContigiousBufferManager::C2CustomNonContigiousBufferManager(
+C2CustomNonContiguousBufferManager::C2CustomNonContiguousBufferManager(
     const std::shared_ptr<C2Allocator> &allocator,
     const std::shared_ptr<C2BufferStats> stats, const char *name)
     : mInit(C2_NO_INIT),
@@ -862,7 +862,7 @@ C2CustomNonContigiousBufferManager::C2CustomNonContigiousBufferManager(
       mImplName(std::string(name) + ".CNCBMImpl"),
       mName(mImplName.c_str()) {}
 
-c2_status_t C2CustomNonContigiousBufferManager::initialize(
+c2_status_t C2CustomNonContiguousBufferManager::initialize(
     const AllocBasicParams &params, uint32_t capacity) {
     std::lock_guard<std::mutex> lock(mLock);
     mFreeBuffers.clear();
@@ -875,7 +875,7 @@ c2_status_t C2CustomNonContigiousBufferManager::initialize(
     return C2_OK;
 }
 
-c2_status_t C2CustomNonContigiousBufferManager::grabHandle(
+c2_status_t C2CustomNonContiguousBufferManager::grabHandle(
     const AllocBasicParams &params, uint32_t *pId,
     uint64_t *uId, const native_handle_t** handle) {
     std::lock_guard<std::mutex> lock(mLock);
@@ -924,7 +924,7 @@ c2_status_t C2CustomNonContigiousBufferManager::grabHandle(
     return C2_TIMED_OUT;
 }
 
-void C2CustomNonContigiousBufferManager::returnHandle(uint32_t pId, uint64_t uId) {
+void C2CustomNonContiguousBufferManager::returnHandle(uint32_t pId, uint64_t uId) {
     std::lock_guard<std::mutex> lock(mLock);
     int32_t size = 0;
 
@@ -954,7 +954,7 @@ void C2CustomNonContigiousBufferManager::returnHandle(uint32_t pId, uint64_t uId
     mStats->onBufferUnused(size);
 }
 
-c2_status_t C2CustomNonContigiousBufferManager::grow(size_t newSize) {
+c2_status_t C2CustomNonContiguousBufferManager::grow(size_t newSize) {
     std::lock_guard<std::mutex> lock(mLock);
 
     ALOGV("[%s] %s: increase pool capacity %u -> %u\n",
@@ -964,7 +964,7 @@ c2_status_t C2CustomNonContigiousBufferManager::grow(size_t newSize) {
     return C2_OK;
 }
 
-c2_status_t C2CustomNonContigiousBufferManager::shrink(size_t newSize) {
+c2_status_t C2CustomNonContiguousBufferManager::shrink(size_t newSize) {
     std::lock_guard<std::mutex> lock(mLock);
     uint32_t totalAvailableBuffers;
 
@@ -1003,13 +1003,13 @@ c2_status_t C2CustomNonContigiousBufferManager::shrink(size_t newSize) {
 C2CustomBufferManager* getC2CustomBufferManager(
     const std::shared_ptr<C2Allocator> &allocator,
     const std::shared_ptr<C2BufferStats> stats,
-    bool contigious, const char* name) {
+    bool contiguous, const char* name) {
     C2CustomBufferManager* manager = nullptr;
 
-    if(contigious) {
-        manager = new C2CustomContigiousBufferManager(allocator, stats, name);
+    if(contiguous) {
+        manager = new C2CustomContiguousBufferManager(allocator, stats, name);
     } else {
-        manager = new C2CustomNonContigiousBufferManager(allocator, stats, name);
+        manager = new C2CustomNonContiguousBufferManager(allocator, stats, name);
     }
 
     return manager;
@@ -1178,14 +1178,14 @@ bool isInBounds(const T& val, const T& min, const T& max) {
 class C2CustomBlockPool::Impl {
 public:
     Impl(const std::shared_ptr<C2Allocator> &allocator,
-        const bool contigious, const char* name)
+        const bool contiguous, const char* name)
             : mInit(C2_NO_INIT),
               mImplName(std::string(name) + ".Impl"),
               mName(mImplName.c_str()),
-              mIsContigiousPool(contigious),
+              mIsContiguousPool(contiguous),
               mStats(new C2BufferStats(mName)),
               mAllocator(allocator),
-              mBufferPoolManager(getC2CustomBufferManager(allocator, mStats, contigious, mName)),
+              mBufferPoolManager(getC2CustomBufferManager(allocator, mStats, contiguous, mName)),
               mPoolCapacity(kMinPoolCapacity) {
     }
 
@@ -1339,21 +1339,21 @@ public:
                 return ret;
             }
         } else if (isCountUpdateNeeded(poolCapacity)) {
-            /* shrink pool - allowed for both contigious and non-contigius pool */
+            /* shrink pool - allowed for both contiguous and non-contiguous pool */
             if (poolCapacity < mPoolCapacity) {
                 ret = shrinkPool(c2Params, poolCapacity);
                 if (ret != C2_OK) {
                     return ret;
                 }
             } else {
-                /* grow non-contigious pool */
-                if (!mIsContigiousPool) {
+                /* grow non-contiguous pool */
+                if (!mIsContiguousPool) {
                     ret = growPool(c2Params, poolCapacity);
                     if (ret != C2_OK) {
                         return ret;
                     }
                 } else {
-                    /* growing contigious pool not alloed. Reinit again */
+                    /* growing contiguous pool not alloed. Reinit again */
                     ret = initPool(c2Params, poolCapacity);
                     if (ret != C2_OK) {
                         return ret;
@@ -1527,7 +1527,7 @@ private:
     AllocBasicParams mConfig;
     std::string mImplName;
     const char* mName;
-    const bool mIsContigiousPool;
+    const bool mIsContiguousPool;
     const std::shared_ptr<C2BufferStats> mStats;
     const std::shared_ptr<C2Allocator> mAllocator;
     const std::shared_ptr<C2CustomBufferManager> mBufferPoolManager;
@@ -1537,11 +1537,11 @@ private:
 
 C2CustomBlockPool::C2CustomBlockPool(
         const std::shared_ptr<C2Allocator> &allocator,
-        const uint32_t poolType, const local_id_t localId, const bool contigious)
+        const uint32_t poolType, const local_id_t localId, const bool contiguous)
         : mAllocator(allocator),
           mLocalId(localId),
           mPoolType(poolType),
-          mImpl(new Impl(allocator, contigious, std::string("CBP-" + getPoolTypeString(poolType) +
+          mImpl(new Impl(allocator, contiguous, std::string("CBP-" + getPoolTypeString(poolType) +
             std::string("-P") + std::to_string(localId) + "-A" +
             std::to_string(allocator->getId())).c_str())) {}
 
