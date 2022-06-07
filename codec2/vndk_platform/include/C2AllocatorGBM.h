@@ -108,7 +108,7 @@ public:
 
     virtual std::shared_ptr<const Traits> getTraits() const override;
 
-    void resetAllocIndex() const override;
+    virtual void resetAllocIndex() override;
 
     virtual c2_status_t newGraphicAllocation(
             uint32_t width, uint32_t height, uint32_t format, C2MemoryUsage usage,

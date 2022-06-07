@@ -23,7 +23,6 @@
 #include <C2DmaBufAllocator.h>
 #include <C2ErrnoUtils.h>
 
-#include <linux/ion.h>
 #include <sys/mman.h>
 #include <unistd.h>  // getpagesize, size_t, close, dup
 #include <C2Debug.h>
@@ -52,10 +51,10 @@ namespace {
  */
 
 struct C2HandleBuf : public C2Handle {
-    C2HandleBuf(int bufferFd, size_t size)
+    C2HandleBuf(int bufferFd, size_t size, int index)
         : C2Handle(cHeader),
           mFds{bufferFd},
-          mInts{int(size & 0xFFFFFFFF), int((uint64_t(size) >> 32) & 0xFFFFFFFF), kMagic} {}
+          mInts{index, int(size & 0xFFFFFFFF), int((uint64_t(size) >> 32) & 0xFFFFFFFF), kMagic} {}
 
     static bool IsValid(const C2Handle* const o);
 
@@ -63,12 +62,14 @@ struct C2HandleBuf : public C2Handle {
     size_t size() const {
         return size_t(unsigned(mInts.mSizeLo)) | size_t(uint64_t(unsigned(mInts.mSizeHi)) << 32);
     }
+    int index() const { return mInts.mIndex; }
 
    protected:
     struct {
         int mBuffer;  // dmabuf fd
     } mFds;
     struct {
+        int mIndex;   // buffer allocation index
         int mSizeLo;  // low 32-bits of size
         int mSizeHi;  // high 32-bits of size
         int mMagic;
@@ -124,7 +125,7 @@ class C2DmaBufAllocation : public C2LinearAllocation {
       * @param id        allocator id
       */
     C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize, size_t capacity,
-                       C2String heap_name, unsigned flags, C2Allocator::id_t id);
+                       C2String heap_name, unsigned flags, int index, C2Allocator::id_t id);
 
     /**
       * Constructs an allocation by wrapping an existing allocation.
@@ -133,7 +134,7 @@ class C2DmaBufAllocation : public C2LinearAllocation {
       * @param shareFd dmabuf fd of the wrapped allocation
       * @param id      allocator id
       */
-    C2DmaBufAllocation(size_t size, int shareFd, C2Allocator::id_t id);
+    C2DmaBufAllocation(size_t size, int shareFd, int index, C2Allocator::id_t id);
 
     c2_status_t status() const;
 
@@ -272,8 +273,8 @@ C2DmaBufAllocation::~C2DmaBufAllocation() {
 }
 
 C2DmaBufAllocation::C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize, size_t capacity,
-                                       C2String heap_name, unsigned flags, C2Allocator::id_t id)
-    : C2LinearAllocation(capacity), mHandle(-1, 0), mAllocSize(0) {
+                                       C2String heap_name, unsigned flags, int index, C2Allocator::id_t id)
+    : C2LinearAllocation(capacity), mHandle(-1, 0, -1), mAllocSize(0) {
     int bufferFd = -1;
     int ret = 0;
 
@@ -283,22 +284,23 @@ C2DmaBufAllocation::C2DmaBufAllocation(BufferAllocator& alloc, size_t allocSize,
     }
 
     // this may be a non-working handle if bufferFd is negative
-    mHandle = C2HandleBuf(bufferFd, capacity);
+    mHandle = C2HandleBuf(bufferFd, capacity, index);
     mAllocSize = allocSize;
     mId = id;
     mInit = c2_status_t(c2_map_errno<ENOMEM, EACCES, EINVAL>(ret));
 }
 
-C2DmaBufAllocation::C2DmaBufAllocation(size_t size, int shareFd, C2Allocator::id_t id)
-    : C2LinearAllocation(size), mHandle(-1, 0) {
-    mHandle = C2HandleBuf(shareFd, size);
+C2DmaBufAllocation::C2DmaBufAllocation(size_t size, int shareFd, int index, C2Allocator::id_t id)
+    : C2LinearAllocation(size), mHandle(-1, 0, -1) {
+    mHandle = C2HandleBuf(shareFd, size, index);
     mAllocSize = size;
     mId = id;
     mInit = c2_status_t(c2_map_errno<ENOMEM, EACCES, EINVAL>(0));
 }
 
 /* =========================== DMABUF ALLOCATOR =========================== */
-C2DmaBufAllocator::C2DmaBufAllocator(id_t id) : mInit(C2_OK) {
+C2DmaBufAllocator::C2DmaBufAllocator(id_t id)
+    : mInit(C2_OK), mAllocationIndex(0) {
     C2MemoryUsage minUsage = {0, 0};
     C2MemoryUsage maxUsage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
     Traits traits = {"android.allocator.dmabuf", id, LINEAR, minUsage, maxUsage};
@@ -375,6 +377,11 @@ c2_status_t C2DmaBufAllocator::mapUsage(C2MemoryUsage usage, size_t capacity, C2
     return res;
 }
 
+void C2DmaBufAllocator::resetAllocIndex() {
+    ALOGV("%s: %u -> 0\n", __func__, mAllocationIndex);
+    mAllocationIndex = 0;
+}
+
 c2_status_t C2DmaBufAllocator::newLinearAllocation(
         uint32_t capacity, C2MemoryUsage usage, std::shared_ptr<C2LinearAllocation>* allocation) {
     if (allocation == nullptr) {
@@ -397,7 +404,7 @@ c2_status_t C2DmaBufAllocator::newLinearAllocation(
     size_t allocSize = (size_t)capacity + sPadding;
     // TODO: should we align allocation size to mBlockSize to reflect the true allocation size?
     std::shared_ptr<C2DmaBufAllocation> alloc = std::make_shared<C2DmaBufAllocation>(
-            mBufferAllocator, allocSize, allocSize - sPadding, heap_name, flags, getId());
+            mBufferAllocator, allocSize, allocSize - sPadding, heap_name, flags, mAllocationIndex++, getId());
     ret = alloc->status();
     if (ret == C2_OK) {
         *allocation = alloc;
@@ -419,7 +426,7 @@ c2_status_t C2DmaBufAllocator::priorLinearAllocation(
     // TODO: get capacity and validate it
     const C2HandleBuf* h = static_cast<const C2HandleBuf*>(handle);
     std::shared_ptr<C2DmaBufAllocation> alloc =
-            std::make_shared<C2DmaBufAllocation>(h->size(), h->bufferFd(), getId());
+            std::make_shared<C2DmaBufAllocation>(h->size(), h->bufferFd(), h->index(), getId());
     c2_status_t ret = alloc->status();
     if (ret == C2_OK) {
         *allocation = alloc;
