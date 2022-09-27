@@ -26,6 +26,7 @@
 #include <C2PlatformSupport.h>
 #include <cutils/properties.h>
 #include <util/C2InterfaceHelper.h>
+#include <cutils/properties.h>
 
 #include <sys/stat.h>
 #include <dlfcn.h>
@@ -34,6 +35,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+
+uint32_t gCodec2LogLevel;
 
 namespace android {
 
@@ -223,6 +226,13 @@ namespace {
 
 std::shared_ptr<C2AllocatorStore> GetCodec2PlatformAllocatorStore() {
     std::lock_guard<std::mutex> lock(gPlatformAllocatorStoreMutex);
+
+    {
+        char codec2LoggingLevel[PROPERTY_VALUE_MAX];
+        property_get("vendor.codec2.log.level", codec2LoggingLevel, "");
+        gCodec2LogLevel = atoi(codec2LoggingLevel);
+    }
+
     std::shared_ptr<C2PlatformAllocatorStoreImpl> store = gPlatformAllocatorStore.lock();
     if (store == nullptr) {
         store = std::make_shared<C2PlatformAllocatorStoreImpl>();
