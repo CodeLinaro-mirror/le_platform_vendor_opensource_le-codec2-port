@@ -12,6 +12,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #ifndef C2BUFFER_H_
@@ -111,6 +115,14 @@ public:
     bool isHW() const;
 
     /**
+     * Returns a native handle that can be used to send this fence
+     * \note The returned handle, if valid, must be closed and deleted by the caller.
+     *
+     * \return a native handle representing this fence, or nullptr if this fence cannot be marshalled.
+     */
+    C2Handle *handle() const;
+
+    /**
      * Null-fence. A fence that has fired.
      */
     constexpr C2Fence() : mImpl(nullptr) { }
@@ -120,6 +132,66 @@ private:
     std::shared_ptr<Impl> mImpl;
     C2Fence(std::shared_ptr<Impl> impl);
     friend struct _C2FenceFactory;
+};
+
+/**
+ * Event object used by components and the framework.
+ *
+ * Implements the signaling of an event, analogous to a 'promise'.
+ *
+ * Hardware backed events do not go through this object, and must be exposed directly as fences
+ * by vendors.
+ */
+class C2Event {
+public:
+    /**
+     * Returns a fence for this event.
+     */
+    C2Fence fence() const;
+
+    /**
+     * Signals (all) associated fence(s).
+     * This has no effect no effect if the event was already signaled or abandoned.
+     *
+     * \retval C2_OK            the fence(s) were successfully signaled
+     * \retval C2_BAD_STATE     the fence(s) have already been abandoned or merged (caller error)
+     * \retval C2_DUPLICATE     the fence(s) have already been signaled (caller error)
+     * \retval C2_REFUSED       no permission to signal the fence (unexpected - system)
+     * \retval C2_CORRUPTED     some unknown error prevented signaling the fence(s) (unexpected)
+     */
+    c2_status_t fire();
+
+    /**
+     * Trigger this event from the merging of the supplied fences. This means that it will be
+     * abandoned if any of these fences have been abandoned, and it will be fired if all of these
+     * fences have been signaled.
+     *
+     * \retval C2_OK            the merging was successfully done
+     * \retval C2_NO_MEMORY     not enough memory to perform the merging
+     * \retval C2_DUPLICATE     the fence have already been merged (caller error)
+     * \retval C2_BAD_STATE     the fence have already been signaled or abandoned (caller error)
+     * \retval C2_REFUSED       no permission to merge the fence (unexpected - system)
+     * \retval C2_CORRUPTED     some unknown error prevented merging the fence(s) (unexpected)
+     */
+    c2_status_t merge(std::vector<C2Fence> fences);
+
+    /**
+     * Abandons the event and any associated fence(s).
+     * \note Call this to explicitly abandon an event before it is destructed to avoid a warning.
+     *
+     * This has no effect no effect if the event was already signaled or abandoned.
+     *
+     * \retval C2_OK            the fence(s) were successfully signaled
+     * \retval C2_BAD_STATE     the fence(s) have already been signaled or merged (caller error)
+     * \retval C2_DUPLICATE     the fence(s) have already been abandoned (caller error)
+     * \retval C2_REFUSED       no permission to abandon the fence (unexpected - system)
+     * \retval C2_CORRUPTED     some unknown error prevented signaling the fence(s) (unexpected)
+     */
+    c2_status_t abandon();
+
+private:
+    class Impl;
+    std::shared_ptr<Impl> mImpl;
 };
 
 /// \addtogroup buf_internal Internal

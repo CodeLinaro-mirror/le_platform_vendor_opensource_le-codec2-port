@@ -27,7 +27,7 @@
 
  Changes from Qualcomm Innovation Center are provided under the following license:
 
- Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
  modification, are permitted (subject to the limitations in the
@@ -157,7 +157,7 @@ uint64_t C2HandleGBM::usage(const C2Handle *const o) {
     if (!IsValid(o)) {
         return 0;
     }
-    return (uint64_t(GetExtraData(o)->usageHi) << 32) | GetExtraData(o)->usageLo;
+    return (uint64_t(GetExtraData(o)->usage_hi) << 32) | GetExtraData(o)->usage_lo;
 }
 
 uint32_t C2HandleGBM::stride(const C2Handle *const o) {
@@ -171,7 +171,7 @@ uint32_t C2HandleGBM::sliceHeight(const C2Handle *const o) {
     if (!IsValid(o)) {
         return 0;
     }
-    return GetExtraData(o)->sliceHeight;
+    return GetExtraData(o)->slice_height;
 }
 
 uint64_t C2HandleGBM::uId(const C2Handle *const o) {
