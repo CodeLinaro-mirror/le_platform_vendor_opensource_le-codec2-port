@@ -93,6 +93,8 @@
 #define PAGE_SIZE  4096
 #define LOG_NDEBUG 0
 
+extern uint32_t gCodec2LogLevel;
+
 // Placeholder stringprintf stub
 // implent the correct function
 #define StringPrintf(fmt, ...) " "
@@ -159,187 +161,15 @@
 #define LOG_TAG "Codec2VndkLe"
 #endif
 
-// ---------------------------------------------------------------------
+enum C2LogLevel : uint32_t {
+    C2_MSGLEVEL_INFO = 0x01,
+    C2_MSGLEVEL_DEBUG = 0x02,
+    C2_MSGLEVEL_VERBOSE = 0x4,
+};
 
-/*
- * Simplified macro to send a verbose log message using the current LOG_TAG.
- */
-
-#ifndef ALOGV
-#if LOG_NDEBUG
-#define ALOGV(...)   ((void)0)
-#else
-#define ALOGV(...) ((void)ALOG(LOG_VERBOSE, LOG_TAG, __VA_ARGS__))
-#endif
-#endif
-#define CONDITION(cond)     (__builtin_expect((cond)!=0, 0))
-
-#ifndef ALOGV_IF
-#if LOG_NDEBUG
-#define ALOGV_IF(cond, ...)   ((void)0)
-#else
-#define ALOGV_IF(cond, ...) \
-    ( (CONDITION(cond)) \
-    ? ((void)ALOG(LOG_VERBOSE, LOG_TAG, __VA_ARGS__)) \
-    : (void)0 )
-#endif
-#endif
-
-/*
- * Simplified macro to send a debug log message using the current LOG_TAG.
- */
-#ifndef ALOGD
-#define ALOGD(...) ((void)ALOG(LOG_DEBUG, LOG_TAG, __VA_ARGS__))
-#endif
-
-#ifndef ALOGD_IF
-#define ALOGD_IF(cond, ...) \
-    ( (CONDITION(cond)) \
-    ? ((void)ALOG(LOG_DEBUG, LOG_TAG, __VA_ARGS__)) \
-    : (void)0 )
-#endif
-
-/*
- * Simplified macro to send an info log message using the current LOG_TAG.
- */
-#ifndef ALOGI
-#define ALOGI(...) ((void)ALOG(LOG_INFO, LOG_TAG, __VA_ARGS__))
-#endif
-
-#ifndef ALOGI_IF
-#define ALOGI_IF(cond, ...) \
-    ( (CONDITION(cond)) \
-    ? ((void)ALOG(LOG_INFO, LOG_TAG, __VA_ARGS__)) \
-    : (void)0 )
-#endif
-
-/*
- * Simplified macro to send a warning log message using the current LOG_TAG.
- */
-#ifndef ALOGW
-#define ALOGW(...) ((void)ALOG(LOG_WARN, LOG_TAG, __VA_ARGS__))
-#endif
-
-#ifndef ALOGW_IF
-#define ALOGW_IF(cond, ...) \
-    ( (CONDITION(cond)) \
-    ? ((void)ALOG(LOG_WARN, LOG_TAG, __VA_ARGS__)) \
-    : (void)0 )
-#endif
-
-/*
- * Simplified macro to send an error log message using the current LOG_TAG.
- */
-#ifndef ALOGE
-#define ALOGE(...) printf("Test logging from: %s line: %u\n", __func__, __LINE__); \
-    ((void)ALOG(LOG_ERROR, LOG_TAG, __VA_ARGS__))
-#endif
-
-#ifndef ALOGE_IF
-#define ALOGE_IF(cond, ...) \
-    ( (CONDITION(cond)) \
-    ? ((void)ALOG(LOG_ERROR, LOG_TAG, __VA_ARGS__)) \
-    : (void)0 )
-#endif
-
-// ---------------------------------------------------------------------
-
-/*
- * Conditional based on whether the current LOG_TAG is enabled at
- * verbose priority.
- */
-#ifndef IF_ALOGV
-#if LOG_NDEBUG
-#define IF_ALOGV() if (false)
-#else
-#define IF_ALOGV() IF_ALOG(LOG_VERBOSE, LOG_TAG)
-#endif
-#endif
-
-/*
- * Conditional based on whether the current LOG_TAG is enabled at
- * debug priority.
- */
-#ifndef IF_ALOGD
-#define IF_ALOGD() IF_ALOG(LOG_DEBUG, LOG_TAG)
-#endif
-
-/*
- * Conditional based on whether the current LOG_TAG is enabled at
- * info priority.
- */
-#ifndef IF_ALOGI
-#define IF_ALOGI() IF_ALOG(LOG_INFO, LOG_TAG)
-#endif
-
-/*
- * Conditional based on whether the current LOG_TAG is enabled at
- * warn priority.
- */
-#ifndef IF_ALOGW
-#define IF_ALOGW() IF_ALOG(LOG_WARN, LOG_TAG)
-#endif
-
-/*
- * Conditional based on whether the current LOG_TAG is enabled at
- * error priority.
- */
-#ifndef IF_ALOGE
-#define IF_ALOGE() IF_ALOG(LOG_ERROR, LOG_TAG)
-#endif
-
-// ---------------------------------------------------------------------
-
-/*
- * Log a fatal error.  If the given condition fails, this stops program
- * execution like a normal assertion, but also generating the given message.
- * It is NOT stripped from release builds.  Note that the condition test
- * is -inverted- from the normal assert() semantics.
- */
-#ifndef LOG_ALWAYS_FATAL_IF
-#define LOG_ALWAYS_FATAL_IF(cond, ...) \
-    ( (CONDITION(cond)) \
-    ? ((void)ALOG(LOG_ERR, LOG_TAG, ## __VA_ARGS__)) \
-    : (void)0 )
-#endif
-
-#ifndef LOG_ALWAYS_FATAL
-#define LOG_ALWAYS_FATAL(...) \
-    ( ((void)ALOG(LOG_ERR, LOG_TAG, ## __VA_ARGS__))
-#endif
-
-/*
- * Versions of LOG_ALWAYS_FATAL_IF and LOG_ALWAYS_FATAL that
- * are stripped out of release builds.
- */
-#if LOG_NDEBUG
-
-#ifndef LOG_FATAL_IF
-#define LOG_FATAL_IF(cond, ...) ((void)0)
-#endif
-#ifndef LOG_FATAL
-#define LOG_FATAL(...) ((void)0)
-#endif
-
-#else
-
-#ifndef LOG_FATAL_IF
-#define LOG_FATAL_IF(cond, ...) LOG_ALWAYS_FATAL_IF(cond, ## __VA_ARGS__)
-#endif
-#ifndef LOG_FATAL
-#define LOG_FATAL(...) LOG_ALWAYS_FATAL(__VA_ARGS__)
-#endif
-
-#endif
-
-/*
- * Assertion that generates a log message when the assertion fails.
- * Stripped out of release builds.  Uses the current LOG_TAG.
- */
-#ifndef ALOG_ASSERT
-#define ALOG_ASSERT(cond, ...) LOG_FATAL_IF(!(cond), ## __VA_ARGS__)
-//#define ALOG_ASSERT(cond) LOG_FATAL_IF(!(cond), "Assertion failed: " #cond)
-#endif
+#define ALOGV(format, args...) ALOGV_IF((gCodec2LogLevel & C2_MSGLEVEL_VERBOSE), format, ##args)
+#define ALOGD(format, args...) ALOGD_IF((gCodec2LogLevel & C2_MSGLEVEL_DEBUG), format, ##args)
+#define ALOGI(format, args...) ALOGI_IF((gCodec2LogLevel & C2_MSGLEVEL_INFO), format, ##args)
 
 #endif  // C2_HOST_DEBUG_LOG_H_
 

@@ -787,7 +787,7 @@ c2_status_t C2CustomContiguousBufferManager::grabHandle(
         mStats->onBufferRecycled(size);
         return C2_OK;
     }
-    ALOGE("[%s] %s failed. index %u, buf-id %llu, clientOwn %u\n",
+    ALOGD("[%s] %s failed. index %u, buf-id %llu, clientOwn %u\n",
         mName, __func__, mNextSlot,
         mBuffers[mNextSlot].buf->allocation()->uId(),
         mBuffers[mNextSlot].ownedByClient);
