@@ -184,4 +184,8 @@ private:
 
 } // namespace android
 
+void _UnwrapNativeCodec2GBMMetadata(
+     const C2Handle *const handle, uint32_t *width, uint32_t *height,
+     uint32_t *format,uint64_t *usage, uint32_t *stride, uint32_t *size);
+
 #endif // _CODEC2_ALLOCATOR_GBM_H_

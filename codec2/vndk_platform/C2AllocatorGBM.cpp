@@ -596,3 +596,13 @@ bool C2AllocatorGBM::CheckHandle(const C2Handle* const o) {
 }
 
 } // namespace android
+
+void _UnwrapNativeCodec2GBMMetadata(
+        const C2Handle *const handle,
+        uint32_t *width, uint32_t *height, uint32_t *format,uint64_t *usage, uint32_t *stride, uint32_t *size) {
+    android::C2HandleGBM::Import(handle, width, height);
+    *format = android::C2HandleGBM::format(handle);
+    *usage = android::C2HandleGBM::usage(handle);
+    *stride = android::C2HandleGBM::stride(handle);
+    *size = android::C2HandleGBM::bufferSize(handle);
+}
