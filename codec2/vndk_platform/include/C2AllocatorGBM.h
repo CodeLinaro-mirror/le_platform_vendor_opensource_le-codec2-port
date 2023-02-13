@@ -24,6 +24,10 @@
  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+ Changes from Qualcomm Innovation Center are provided under the following license:
+ Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #ifndef _CODEC2_ALLOCATOR_GBM_H_
@@ -36,6 +40,7 @@
 #include <list>
 
 namespace android {
+
 
 class C2HandleGBM : public C2Handle {
 public:
@@ -73,32 +78,44 @@ public:
     static const C2HandleGBM* Import(
             const C2Handle *const handle,
             uint32_t *width, uint32_t *height);
-private:
+	struct GbmBuf {
+		int buffer_fd; // shared ion buffer
+		int meta_buffer_fd;
+	};
     struct ExtraData {
         uint32_t width;
         uint32_t height;
         uint32_t format;
-        uint32_t usageLo;
-        uint32_t usageHi;
+        uint32_t usage_lo;
+        uint32_t usage_hi;
         uint32_t stride;
-        uint32_t sliceHeight;
+        uint32_t slice_height;
         uint32_t size;
         uint32_t uIdLo;
         uint32_t uIdHi;
         uint32_t index;
         uint32_t magic;
+		uint32_t id;
     };
 
+	GbmBuf mFds;
+	ExtraData mInts;
+
     enum {
+		NUM_FDS = sizeof(mFds) / sizeof(int),
         NUM_INTS = sizeof(ExtraData) / sizeof(int),
+		VERSION = sizeof(C2Handle)
     };
 
     static constexpr uint32_t MAGIC = '\xc2gb\x00';
 
+private:
     static const ExtraData* GetExtraData(const C2Handle *const handle);
 
     static ExtraData *GetExtraData(C2Handle *const handle);
 };
+
+static_assert(offsetof(C2HandleGBM, data) == offsetof(C2HandleGBM, mFds));
 
 class C2AllocatorGBM : public C2Allocator {
 public:
@@ -166,5 +183,9 @@ private:
 };
 
 } // namespace android
+
+void _UnwrapNativeCodec2GBMMetadata(
+     const C2Handle *const handle, uint32_t *width, uint32_t *height,
+     uint32_t *format,uint64_t *usage, uint32_t *stride, uint32_t *size);
 
 #endif // _CODEC2_ALLOCATOR_GBM_H_
