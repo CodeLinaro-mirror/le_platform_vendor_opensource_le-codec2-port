@@ -302,6 +302,10 @@ c2_status_t C2AllocationGBM::map(
     (void)c2Rect;
     (void)fence;
     void *base;
+    if (!layout || !addr) {
+        ALOGD("wrong param");
+        return C2_BAD_VALUE;
+    }
     c2_status_t err = C2_OK;
     *addr = nullptr;
     if (!mMappings.empty()) {
@@ -328,9 +332,86 @@ c2_status_t C2AllocationGBM::map(
         err = c2_map_errno<EINVAL>(errno);
     } else {
         ALOGV("successfully mapped: addr %p, size %zu, prot = %d, flags = %d, mapFd = %d\n",
-                *addr, mapSize, prot, flags, fd);
-        *addr = (uint8_t*)base;
+                base, mapSize, prot, flags, fd);
         mMappings.push_back({base, mapSize});
+    }
+
+    if (err == C2_OK) {
+        auto format = C2HandleGBM::format(mHandle);
+        auto bufferlayout = mBufferObj->buf_lyt;
+        switch (format) {
+            case static_cast<uint32_t>(GBM_FORMAT_YCbCr_420_P010_VENUS):
+                addr[C2PlanarLayout::PLANE_Y] = (uint8_t *)base;
+                addr[C2PlanarLayout::PLANE_U] = (uint8_t *)((uint32_t*)base + bufferlayout.planes[1].offset);
+                layout->type = C2PlanarLayout::TYPE_YUV;
+                layout->numPlanes = bufferlayout.num_planes;
+                layout->rootPlanes = bufferlayout.num_planes;
+                layout->planes[C2PlanarLayout::PLANE_Y] = {
+                        C2PlaneInfo::CHANNEL_Y,
+                        bufferlayout.planes[0].h_increment,
+                        bufferlayout.planes[0].v_increment,
+                        2,2,
+                        16,10,6,
+                        C2PlaneInfo::NATIVE,
+                        C2PlanarLayout::PLANE_Y,
+                        0};
+                layout->planes[C2PlanarLayout::PLANE_U] = {
+                        C2PlaneInfo::CHANNEL_CB,
+                        bufferlayout.planes[1].h_increment,
+                        bufferlayout.planes[1].v_increment,
+                        2,2,
+                        16,10,6,
+                        C2PlaneInfo::NATIVE,
+                        C2PlanarLayout::PLANE_U,
+                        0};
+                layout->planes[C2PlanarLayout::PLANE_V] = {
+                        C2PlaneInfo::CHANNEL_CR,
+                        bufferlayout.planes[2].h_increment,
+                        bufferlayout.planes[2].v_increment,
+                        2,2,
+                        16,10,6,
+                        C2PlaneInfo::NATIVE,
+                        C2PlanarLayout::PLANE_U,
+                        2};
+                break;
+            case static_cast<uint32_t>(GBM_FORMAT_NV12):
+                addr[C2PlanarLayout::PLANE_Y] = (uint8_t *)base;
+                addr[C2PlanarLayout::PLANE_U] = (uint8_t *)((uint32_t*)base + bufferlayout.planes[1].offset);
+                layout->type = C2PlanarLayout::TYPE_YUV;
+                layout->numPlanes = bufferlayout.num_planes;
+                layout->rootPlanes = bufferlayout.num_planes;
+                layout->planes[C2PlanarLayout::PLANE_Y] = {
+                        C2PlaneInfo::CHANNEL_Y,
+                        bufferlayout.planes[0].h_increment,
+                        bufferlayout.planes[0].v_increment,
+                        1,1,
+                        8,8,0,
+                        C2PlaneInfo::NATIVE,
+                        C2PlanarLayout::PLANE_Y,
+                        0};
+                layout->planes[C2PlanarLayout::PLANE_U] = {
+                        C2PlaneInfo::CHANNEL_CB,
+                        bufferlayout.planes[1].h_increment,
+                        bufferlayout.planes[1].v_increment,
+                        1,1,
+                        8,8,0,
+                        C2PlaneInfo::NATIVE,
+                        C2PlanarLayout::PLANE_U,
+                        0};
+                layout->planes[C2PlanarLayout::PLANE_V] = {
+                        C2PlaneInfo::CHANNEL_CR,
+                        bufferlayout.planes[2].h_increment,
+                        bufferlayout.planes[2].v_increment,
+                        1,1,
+                        8,8,0,
+                        C2PlaneInfo::NATIVE,
+                        C2PlanarLayout::PLANE_U,
+                        1};
+                break;
+            default:
+                err = c2_map_errno<EINVAL>(errno);
+                break;
+        }
     }
 
     return err;
