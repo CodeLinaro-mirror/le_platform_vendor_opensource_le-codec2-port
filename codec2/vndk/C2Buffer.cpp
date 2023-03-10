@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- *
  * Changes from Qualcomm Innovation Center are provided under the following license:
  * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
@@ -1196,7 +1195,7 @@ public:
               mStats(new C2BufferStats(mName)),
               mAllocator(allocator),
               mBufferPoolManager(getC2CustomBufferManager(allocator, mStats, contiguous, mName)),
-              mPoolCapacity(kMinPoolCapacity) {
+              mPoolCapacity(kMaxPoolCapacity) {
     }
 
     virtual ~Impl() = default;
@@ -1507,8 +1506,9 @@ public:
             return C2_CORRUPTED;
         }
 
-        /* clone nativehandle */
-        cHandle = native_handle_clone(origHandle);
+        /* memcpy nativehandle */
+        cHandle = native_handle_create(origHandle->numFds, origHandle->numInts);
+        memcpy((void*)&cHandle->data, &origHandle->data, sizeof(int)*(origHandle->numFds + origHandle->numInts));
 
         /* import graphic allocation using cloned handle */
         ret = mAllocator->priorGraphicAllocation(cHandle, &alloc);
