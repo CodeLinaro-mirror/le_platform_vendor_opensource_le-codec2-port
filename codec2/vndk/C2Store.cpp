@@ -492,6 +492,7 @@ c2_status_t CreateCodec2BlockPool(
         C2PlatformAllocatorStore::id_t allocatorId,
         std::shared_ptr<const C2Component> component,
         std::shared_ptr<C2BlockPool> *pool) {
+    C2TRACED("C2Store::CreateCodec2BlockPool");
     pool->reset();
 
     return sBlockPoolCache->createBlockPool(allocatorId, {component}, pool);
