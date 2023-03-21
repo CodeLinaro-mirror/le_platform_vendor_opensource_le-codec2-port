@@ -12,6 +12,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #define LOG_TAG "C2Store"
@@ -37,6 +42,7 @@
 #include <mutex>
 
 uint32_t gCodec2LogLevel;
+uint32_t gCodec2TraceLevel;
 
 namespace android {
 
@@ -231,6 +237,13 @@ std::shared_ptr<C2AllocatorStore> GetCodec2PlatformAllocatorStore() {
         char codec2LoggingLevel[PROPERTY_VALUE_MAX];
         property_get("vendor.codec2.log.level", codec2LoggingLevel, "");
         gCodec2LogLevel = atoi(codec2LoggingLevel);
+    }
+
+    {
+        char codec2TraceLevel[PROPERTY_VALUE_MAX];
+        property_get("vendor.codec2.trace.level",codec2TraceLevel, "");
+        gCodec2TraceLevel = static_cast<uint32_t>(strtoul(codec2TraceLevel, nullptr, 16));
+        ALOGD("codec2 trace level %d",gCodec2TraceLevel);
     }
 
     std::shared_ptr<C2PlatformAllocatorStoreImpl> store = gPlatformAllocatorStore.lock();
