@@ -152,20 +152,6 @@ std::shared_ptr<C2ComponentStore> GetTestComponentStore(
  */
 void SetPreferredCodec2ComponentStore(std::shared_ptr<C2ComponentStore> store);
 
-/**
- * Returns the pool mask.
- * \retval the default pool mask should be adopted if it could not be obtained from property
- *         "debug.stagefright.c2-poolmask"
- */
-int GetCodec2PoolMask();
-
-/**
- * Returns the preferred linear buffer allocator id from param poolMask.
- * C2PlatformAllocatorStore::ION should be chosen as fallback allocator if BLOB is not enabled from
- * param poolMask.
- */
-C2PlatformAllocatorStore::id_t GetPreferredLinearAllocatorId(int poolMask);
-
 } // namespace android
 
 #endif // STAGEFRIGHT_CODEC2_PLATFORM_SUPPORT_H_
