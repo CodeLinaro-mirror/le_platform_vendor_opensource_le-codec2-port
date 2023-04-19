@@ -522,7 +522,8 @@ public:
         usage |= flags & C2MemoryUsage::CPU_READ ? GBM_BO_USAGE_CPU_READ_QTI : 0;
         usage |= flags & C2MemoryUsage::READ_PROTECTED ? GBM_BO_USAGE_PROTECTED_QTI : 0;
         usage |= flags & C2MemoryUsage::CPU_WRITE ? GBM_BO_USAGE_CPU_WRITE_QTI : 0;
-        usage |= flags & C2MemoryUsage:: WRITE_PROTECTED ? GBM_BO_USAGE_PROTECTED_QTI : 0;
+        usage |= flags & C2MemoryUsage::WRITE_PROTECTED ? GBM_BO_USAGE_PROTECTED_QTI : 0;
+        usage |= flags & C2MemoryUsage::PLATFORM_MASK;
         return usage;
     }
 
