@@ -42,7 +42,7 @@
  *
  * Changes from Qualcomm Innovation Center are provided under the following license:
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted (subject to the limitations in the
@@ -78,6 +78,8 @@
 #ifndef C2_LINUX_DEBUG_LOG_H_
 #define C2_LINUX_DEBUG_LOG_H_
 
+#define ATRACE_TAG ATRACE_TAG_VIDEO
+
 #include <utils/Log.h>
 #include <iostream>
 #include <memory>
@@ -85,6 +87,7 @@
 #include <cstring>
 #include <limits.h>
 #include <cutils/memory.h>
+#include <cutils/trace.h>
 
 #ifndef __unused
 #define __unused __attribute__((__unused__))
@@ -94,6 +97,7 @@
 #define LOG_NDEBUG 0
 
 extern uint32_t gCodec2LogLevel;
+extern uint32_t gCodec2TraceLevel;
 
 // Placeholder stringprintf stub
 // implent the correct function
@@ -173,3 +177,96 @@ enum C2LogLevel : uint32_t {
 
 #endif  // C2_HOST_DEBUG_LOG_H_
 
+//-------------------------------------------------------------------------------------------------
+// T R A C I N G
+//-------------------------------------------------------------------------------------------------
+
+/// @addtogroup trace Tracing
+/// @{
+
+/**
+ *
+ * @brief <b> "vendor.codec2.trace.level" </b> controls logging debug messages
+ *
+ * <pre>
+ *
+ * <b> Eg: adb shell setprop vendor.codec2.trace.level 0x3 </b>
+ *
+ *    LEVELS
+ *    .....................................................
+ *      level       C2TRACEV_{DOMAIN}       C2TRACED_{DOMAIN}
+ *    .....................................................
+ *      0xX0         silent                silent (default)
+ *      0xX1         silent                logged
+ *      0xX3         logged                logged
+ *    .....................................................
+ *
+ *    DOMAINS
+ *
+ * </pre>
+ */
+enum C2TraceEnable : uint32_t {
+    C2_TRACE_LEVEL_DEBUG   = 0x01,     ///< high-level debug traces
+    C2_TRACE_LEVEL_VERBOSE = 0x02,     ///< very detailed traces
+};
+
+class C2AutoTracer {
+ public:
+    explicit C2AutoTracer(uint32_t prio, const char *msg)
+        : mPrio(prio) {
+        if (gCodec2TraceLevel & mPrio) {
+            atrace_begin(ATRACE_TAG_VIDEO, msg);
+        }
+    }
+    ~C2AutoTracer() {
+        if (gCodec2TraceLevel & mPrio) {
+            atrace_end(ATRACE_TAG_VIDEO);
+        }
+    }
+ private:
+    uint32_t mPrio;
+};
+
+#define C2TRACEV_ENABLED \
+    ((*(&gCodec2TraceLevel) & C2_TRACE_LEVEL_VERBOSE))
+#define C2TRACED_ENABLED \
+    ((*(&gCodec2TraceLevel) & C2_TRACE_LEVEL_DEBUG))
+
+#define C2TRACEV(msg) C2AutoTracer _tracer(C2_TRACE_LEVEL_VERBOSE, msg);
+
+#define C2TRACED(msg) C2AutoTracer _tracer(C2_TRACE_LEVEL_DEBUG, msg);
+
+#define C2TRACEV_INT64(instName, valName, val)                                               \
+    if (C2TRACEV_ENABLED) {                                                                  \
+        char msg[64] = {0};                                                                 \
+        snprintf(msg, sizeof(msg), "%s-%s", instName, valName);                             \
+        atrace_int64(ATRACE_TAG_VIDEO, msg, val);                                           \
+    }                                                                                       \
+
+#define C2TRACED_INT64(instName, valName, val)                                               \
+    if (C2TRACED_ENABLED) {                                                                  \
+        char msg[64] = {0};                                                                 \
+        snprintf(msg, sizeof(msg), "%s-%s", instName, valName);                             \
+        atrace_int64(ATRACE_TAG_VIDEO, msg, val);                                           \
+    }                                                                                       \
+
+#define C2TRACEV_ASYNC_BEGIN(msg, cookie)                                                    \
+    if (C2TRACEV_ENABLED) {                                                                  \
+        atrace_async_begin(ATRACE_TAG_VIDEO, msg, cookie);                                  \
+    }                                                                                       \
+
+#define C2TRACEV_ASYNC_END(msg, cookie)                                                      \
+    if (C2TRACEV_ENABLED) {                                                                  \
+        atrace_async_end(ATRACE_TAG_VIDEO, msg, cookie);                                    \
+    }                                                                                       \
+
+#define C2TRACED_ASYNC_BEGIN(msg, cookie)                                                    \
+    if (C2TRACED_ENABLED) {                                                                  \
+        atrace_async_begin(ATRACE_TAG_VIDEO, msg, cookie);                                  \
+    }                                                                                       \
+
+#define C2TRACED_ASYNC_END(msg, cookie)                                                      \
+    if (C2TRACED_ENABLED) {                                                                  \
+        atrace_async_end(ATRACE_TAG_VIDEO, msg, cookie);                                    \
+    }                                                                                       \
+/// @endcond HIDE

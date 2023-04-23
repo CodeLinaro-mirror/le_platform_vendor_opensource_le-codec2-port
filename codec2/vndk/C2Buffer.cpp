@@ -12,6 +12,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 //#define LOG_NDEBUG 0
@@ -311,6 +316,7 @@ c2_status_t C2BasicLinearBlockPool::fetchLinearBlock(
         uint32_t size,
         C2MemoryUsage usage,
         std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+    C2TRACED("C2Buffer::fetchLinearBlock");
     block->reset();
 
     std::shared_ptr<C2LinearAllocation> alloc;
@@ -1152,6 +1158,7 @@ c2_status_t C2BasicBlockPool::fetchLinearBlock(
         uint32_t size,
         C2MemoryUsage usage,
         std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+    C2TRACED("C2Buffer::fetchLinearBlock");
     if (mImpl) {
         return mImpl->fetchLinearBlock(size, usage, block);
     }
@@ -1164,6 +1171,7 @@ c2_status_t C2BasicBlockPool::fetchGraphicBlock(
         uint32_t format,
         C2MemoryUsage usage,
         std::shared_ptr<C2GraphicBlock> *block) {
+    C2TRACED("C2Buffer::fetchGraphicBlock");
     if (mImpl) {
         return mImpl->fetchGraphicBlock(width, height, format, usage, block);
     }
@@ -1552,6 +1560,7 @@ c2_status_t C2CustomBlockPool::fetchLinearBlock(
         uint32_t size,
         C2MemoryUsage usage,
         std::shared_ptr<C2LinearBlock> *block /* nonnull */) {
+    C2TRACED("C2Buffer::fetchLinearBlock");
     if (mImpl) {
         return mImpl->fetchLinearBlock(size, usage, block);
     }
@@ -1564,6 +1573,7 @@ c2_status_t C2CustomBlockPool::fetchGraphicBlock(
         uint32_t format,
         C2MemoryUsage usage,
         std::shared_ptr<C2GraphicBlock> *block) {
+    C2TRACED("C2Buffer::fetchGraphicBlock");
     if (mImpl) {
         return mImpl->fetchGraphicBlock(width, height, format, usage, block);
     }
@@ -1869,6 +1879,7 @@ c2_status_t C2BasicGraphicBlockPool::fetchGraphicBlock(
         uint32_t format,
         C2MemoryUsage usage,
         std::shared_ptr<C2GraphicBlock> *block /* nonnull */) {
+    C2TRACED("C2Buffer::fetchGraphicBlock");
     block->reset();
 
     std::shared_ptr<C2GraphicAllocation> alloc;
