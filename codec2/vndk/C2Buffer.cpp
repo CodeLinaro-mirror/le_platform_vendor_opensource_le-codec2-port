@@ -924,7 +924,7 @@ c2_status_t C2CustomNonContiguousBufferManager::grabHandle(
         return C2_OK;
     }
 
-    ALOGE("[%s] %s failed. All handles were with client. free %u, inUse %u\n",
+    ALOGD("[%s] %s failed. All handles were with client. free %u, inUse %u\n",
         mName, __func__, mFreeBuffers.size(), mBuffersInUse.size());
 
     return C2_TIMED_OUT;
