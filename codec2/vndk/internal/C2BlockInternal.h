@@ -71,7 +71,7 @@ struct _C2BlockFactory {
     static
     std::shared_ptr<C2LinearBlock> CreateLinearBlock(
             const std::shared_ptr<C2LinearAllocation> &alloc,
-            std::function<void(C2LinearBlock*)> deleter);
+            std::function<void()> deleter);
 
     /**
      * Create a graphic block from an allocation for an allotted section.
@@ -100,7 +100,7 @@ struct _C2BlockFactory {
     static
     std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
             const std::shared_ptr<C2GraphicAllocation> &alloc,
-            std::function<void(C2GraphicBlock*)> deleter);
+            std::function<void()> deleter);
 };
 #endif // ANDROID_STAGEFRIGHT_C2BLOCK_INTERNAL_H_
 
