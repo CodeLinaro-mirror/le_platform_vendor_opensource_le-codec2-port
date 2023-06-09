@@ -24,6 +24,10 @@
  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 #ifndef _CODEC2_ALLOCATOR_GBM_H_
@@ -59,6 +63,8 @@ public:
 
     static uint32_t sliceHeight(const C2Handle *const o);
 
+    static uint32_t sliceWidth(const C2Handle *const o);
+
     static uint64_t uId(const C2Handle *const o);
 
     static uint32_t index(const C2Handle *const o);
@@ -82,6 +88,7 @@ private:
         uint32_t usageHi;
         uint32_t stride;
         uint32_t sliceHeight;
+        uint32_t sliceWidth;
         uint32_t size;
         uint32_t uIdLo;
         uint32_t uIdHi;

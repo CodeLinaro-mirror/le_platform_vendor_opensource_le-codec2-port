@@ -58,6 +58,10 @@
  IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 // #define LOG_NDEBUG 0
@@ -174,6 +178,13 @@ uint32_t C2HandleGBM::sliceHeight(const C2Handle *const o) {
     return GetExtraData(o)->sliceHeight;
 }
 
+uint32_t C2HandleGBM::sliceWidth(const C2Handle *const o) {
+    if (!IsValid(o)) {
+        return 0;
+    }
+    return GetExtraData(o)->sliceWidth;
+}
+
 uint64_t C2HandleGBM::uId(const C2Handle *const o) {
     if (!IsValid(o)) {
         return 0;
@@ -209,7 +220,7 @@ C2HandleGBM* C2HandleGBM::wrapAndMoveNativeHandle(
         uint32_t format, uint64_t flags, uint32_t index,
         const struct gbm_bo *const bufferObj,
         const native_handle_t *const cHandle) {
-    uint32_t width, height, usageLo, usageHi, stride, sliceHeight, size, uIdLo, uIdHi;
+    uint32_t width, height, usageLo, usageHi, stride, sliceHeight, sliceWidth, size, uIdLo, uIdHi;
     uint64_t uId;
 
     if (native_handle_is_invalid(cHandle) ||
@@ -225,6 +236,7 @@ C2HandleGBM* C2HandleGBM::wrapAndMoveNativeHandle(
     usageHi = uint32_t(flags >> 32);
     stride = bufferObj->stride;
     sliceHeight = bufferObj->aligned_height;
+    sliceWidth = bufferObj->aligned_width;
     size = bufferObj->size;
     uId = getUId(cHandle);
     uIdLo = uint32_t(uId & 0xFFFFFFFF);
@@ -232,7 +244,7 @@ C2HandleGBM* C2HandleGBM::wrapAndMoveNativeHandle(
 
     ExtraData xd = {
         width, height, format, usageLo, usageHi,
-        stride, sliceHeight, size, uIdLo, uIdHi, index, MAGIC
+        stride, sliceHeight, sliceWidth, size, uIdLo, uIdHi, index, MAGIC
     };
     native_handle_t *res = native_handle_create(cHandle->numFds, cHandle->numInts + NUM_INTS);
     if (res == nullptr) {
@@ -501,11 +513,11 @@ public:
         }
 
         ALOGV("%s: fd %d, metaFd %d, width %u, height %u, format %#x, usage %#zx, "
-            "stride %u, sliceHeight %u, size %u, uId %zu, index %u\n", __func__,
+            "stride %u, sliceHeight %u, sliceWidth %u, size %u, uId %zu, index %u\n", __func__,
             gbmHandle->data[0], gbmHandle->data[1], gbmHandle->data[2], gbmHandle->data[3],
             gbmHandle->data[4], (gbmHandle->data[5] | ((uint64_t)gbmHandle->data[6] << 32)),
-            gbmHandle->data[7], gbmHandle->data[8], gbmHandle->data[9], (gbmHandle->data[10] |
-            ((uint64_t)gbmHandle->data[11] << 32)), gbmHandle->data[12]);
+            gbmHandle->data[7], gbmHandle->data[8], gbmHandle->data[9], gbmHandle->data[10], (gbmHandle->data[11] |
+            ((uint64_t)gbmHandle->data[12] << 32)), gbmHandle->data[13]);
 
         allocation->reset(new C2AllocationGBM(
                 width, height, bufferObj, gbmHandle, mTraits->id));
