@@ -332,10 +332,14 @@ c2_status_t C2BasicLinearBlockPool::fetchLinearBlock(
 
 std::shared_ptr<C2LinearBlock> _C2BlockFactory::CreateLinearBlock(
         const std::shared_ptr<C2LinearAllocation> &alloc,
-        std::function<void(C2LinearBlock*)> deleter) {
+        std::function<void()> deleter) {
     std::shared_ptr<C2Block1D::Impl> impl =
-        std::make_shared<C2Block1D::Impl>(alloc);
-    return std::shared_ptr<C2LinearBlock>(new C2LinearBlock(impl, *impl), deleter);
+        std::shared_ptr<C2Block1D::Impl>(new C2Block1D::Impl(alloc),
+        [cb = deleter](C2Block1D::Impl *impl) {
+            delete impl;
+            cb();
+        });
+    return std::shared_ptr<C2LinearBlock>(new C2LinearBlock(impl, *impl));
 }
 
 std::shared_ptr<C2LinearBlock> _C2BlockFactory::CreateLinearBlock(
@@ -1068,8 +1072,7 @@ public:
         if (ret == C2_OK && alloc) {
             *block = _C2BlockFactory::CreateLinearBlock(alloc,
                 [manager = mBufferPoolManager,
-                    uId = uniqueId](C2LinearBlock *blk) {
-                    delete blk;
+                    uId = uniqueId]() {
                     manager->returnHandle(uId);
                 });
             if (*block) {
@@ -1119,8 +1122,7 @@ public:
         if (ret == C2_OK && alloc) {
             *block = _C2BlockFactory::CreateGraphicBlock(alloc,
                 [manager = mBufferPoolManager,
-                    uId = uniqueId](C2GraphicBlock *blk) {
-                    delete blk;
+                    uId = uniqueId]() {
                     manager->returnHandle(uId);
                 });
             if (*block) {
@@ -1436,8 +1438,7 @@ public:
         if (ret == C2_OK && alloc) {
             *block = _C2BlockFactory::CreateLinearBlock(alloc,
                 [manager = mBufferPoolManager, bId = bufferId,
-                    uId = uniqueId](C2LinearBlock *blk) {
-                    delete blk;
+                    uId = uniqueId]() {
                     manager->returnHandle(bId, uId);
                 });
             if (*block) {
@@ -1514,8 +1515,7 @@ public:
         if (ret == C2_OK && alloc) {
             *block = _C2BlockFactory::CreateGraphicBlock(alloc,
                 [manager = mBufferPoolManager, bId = bufferId,
-                    uId = uniqueId](C2GraphicBlock *blk) {
-                    delete blk;
+                    uId = uniqueId]() {
                     manager->returnHandle(bId, uId);
                 });
             if (*block) {
@@ -1895,10 +1895,14 @@ c2_status_t C2BasicGraphicBlockPool::fetchGraphicBlock(
 
 std::shared_ptr<C2GraphicBlock> _C2BlockFactory::CreateGraphicBlock(
         const std::shared_ptr<C2GraphicAllocation> &alloc,
-        std::function<void(C2GraphicBlock*)> deleter) {
+        std::function<void()> deleter) {
     std::shared_ptr<C2Block2D::Impl> impl =
-        std::make_shared<C2Block2D::Impl>(alloc);
-    return std::shared_ptr<C2GraphicBlock>(new C2GraphicBlock(impl, *impl), deleter);
+        std::shared_ptr<C2Block2D::Impl>(new C2Block2D::Impl(alloc),
+        [cb = deleter](C2Block2D::Impl *impl) {
+            delete impl;
+            cb();
+        });
+    return std::shared_ptr<C2GraphicBlock>(new C2GraphicBlock(impl, *impl));
 }
 
 std::shared_ptr<C2GraphicBlock> _C2BlockFactory::CreateGraphicBlock(
