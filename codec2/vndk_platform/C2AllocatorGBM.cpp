@@ -340,7 +340,7 @@ c2_status_t C2AllocationGBM::map(
         err = C2_BAD_VALUE;
 
     if (err == C2_OK) {
-        auto format = C2HandleGBM::format(mHandle);
+        auto format = mBufferObj->format;
         auto bufferlayout = mBufferObj->buf_lyt;
         switch (format) {
             case static_cast<uint32_t>(GBM_FORMAT_YCbCr_420_P010_VENUS):
@@ -378,6 +378,7 @@ c2_status_t C2AllocationGBM::map(
                         2};
                 break;
             case static_cast<uint32_t>(GBM_FORMAT_NV12):
+            case static_cast<uint32_t>(GBM_FORMAT_NV12_HEIF):
                 addr[C2PlanarLayout::PLANE_Y] = (uint8_t *)base;
                 addr[C2PlanarLayout::PLANE_U] = (uint8_t *)((uint32_t*)base + bufferlayout.planes[1].offset);
                 layout->type = C2PlanarLayout::TYPE_YUV;
