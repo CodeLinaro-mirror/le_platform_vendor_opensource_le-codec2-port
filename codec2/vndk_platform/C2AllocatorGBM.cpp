@@ -27,7 +27,7 @@
 
  Changes from Qualcomm Innovation Center are provided under the following license:
 
- Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
  modification, are permitted (subject to the limitations in the
@@ -466,8 +466,12 @@ public:
 
         mDriverFd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
         if (mDriverFd < 0) {
-            ALOGE("%s: opening dri device node failed\n", __func__);
-            return;
+            ALOGD("%s: opening dri device node failed\n", __func__);
+            mDriverFd = open("/dev/dma_heap/qcom,system", O_RDWR | O_CLOEXEC);
+            if (mDriverFd < 0) {
+                ALOGE("%s: opening qcom,system failed\n", __func__);
+                return;
+            }
         }
         mGBM = gbm_create_device(mDriverFd);
         if (mGBM == nullptr) {
