@@ -40,53 +40,6 @@ namespace {
     constexpr uint32_t MAX_PADDING = 0x8000; // 32KB
 }
 
-/* =========================== BUFFER HANDLE =========================== */
-/**
- * Buffer handle
- *
- * Stores dmabuf fd & metadata
- *
- * This handle will not capture mapped fd-s as updating that would require a
- * global mutex.
- */
-
-struct C2HandleBuf : public C2Handle {
-    C2HandleBuf(int bufferFd, size_t size, int index)
-        : C2Handle(cHeader),
-          mFds{bufferFd},
-          mInts{index, int(size & 0xFFFFFFFF), int((uint64_t(size) >> 32) & 0xFFFFFFFF), kMagic} {}
-
-    static bool IsValid(const C2Handle* const o);
-
-    int bufferFd() const { return mFds.mBuffer; }
-    size_t size() const {
-        return size_t(unsigned(mInts.mSizeLo)) | size_t(uint64_t(unsigned(mInts.mSizeHi)) << 32);
-    }
-    int index() const { return mInts.mIndex; }
-
-   protected:
-    struct {
-        int mBuffer;  // dmabuf fd
-    } mFds;
-    struct {
-        int mIndex;   // buffer allocation index
-        int mSizeLo;  // low 32-bits of size
-        int mSizeHi;  // high 32-bits of size
-        int mMagic;
-    } mInts;
-
-   private:
-    typedef C2HandleBuf _type;
-    enum {
-        kMagic = '\xc2io\x00',
-        numFds = sizeof(mFds) / sizeof(int),
-        numInts = sizeof(mInts) / sizeof(int),
-        version = sizeof(C2Handle)
-    };
-    // constexpr static C2Handle cHeader = { version, numFds, numInts, {} };
-    const static C2Handle cHeader;
-};
-
 const C2Handle C2HandleBuf::cHeader = {
         C2HandleBuf::version, C2HandleBuf::numFds, C2HandleBuf::numInts, {}};
 

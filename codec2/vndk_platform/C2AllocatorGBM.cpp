@@ -526,8 +526,13 @@ public:
         uint32_t usage = 0;
         usage |= flags & C2MemoryUsage::CPU_READ ? GBM_BO_USAGE_CPU_READ_QTI : 0;
         usage |= flags & C2MemoryUsage::READ_PROTECTED ? GBM_BO_USAGE_PROTECTED_QTI : 0;
+        usage |= flags & C2MemoryUsage::READ_PROTECTED ? GBM_BO_ALLOC_SECURE_DISPLAY_HEAP_QTI : 0;
+        usage |= flags & C2MemoryUsage::READ_PROTECTED ? GBM_BO_ALLOC_SECURE_HEAP_QTI : 0;
+        usage |= flags & C2MemoryUsage::READ_PROTECTED ? GBM_BO_USE_RENDERING : 0;
+        usage |= flags & C2MemoryUsage::READ_PROTECTED ? GBM_BO_USAGE_UNCACHED_QTI : 0;
         usage |= flags & C2MemoryUsage::CPU_WRITE ? GBM_BO_USAGE_CPU_WRITE_QTI : 0;
         usage |= flags & C2MemoryUsage::WRITE_PROTECTED ? GBM_BO_USAGE_PROTECTED_QTI : 0;
+        usage |= flags & GBM_BO_USAGE_UBWC_ALIGNED_QTI ? GBM_BO_USAGE_UBWC_ALIGNED_QTI : 0;
         usage |= flags & C2MemoryUsage::PLATFORM_MASK;
         return usage;
     }
