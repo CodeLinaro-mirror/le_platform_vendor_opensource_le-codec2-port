@@ -407,7 +407,8 @@ public:
         mDriverFd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
         if (mDriverFd < 0) {
             ALOGE("%s: opening dri device node failed\n", __func__);
-            return;
+            // Don't return from here. As per discussion with display
+            // team, GBM device is independent of driver fd.
         }
         mGBM = gbm_create_device(mDriverFd);
         if (mGBM == nullptr) {
