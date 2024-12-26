@@ -101,7 +101,6 @@ public:
         uint32_t magic;
         uint32_t id;
     };
-
     GbmBuf mFds;
     ExtraData mInts;
 
