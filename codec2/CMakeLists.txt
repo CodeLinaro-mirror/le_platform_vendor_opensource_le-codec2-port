@@ -56,6 +56,7 @@ set(CODEC2_VNDK_SOURCE
     vndk_platform/C2AllocatorGBM.cpp)
 add_library(codec2_vndk SHARED ${CODEC2_VNDK_SOURCE})
 target_link_libraries(codec2_vndk gbm dmabufheap dl log cutils)
+target_compile_options(codec2_vndk PRIVATE -Wno-sign-conversion -fno-c++-static-destructors)
 
 set(CODEC2_VNDK_LIBS
     codec2_vndk)
