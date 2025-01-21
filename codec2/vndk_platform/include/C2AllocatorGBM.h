@@ -25,8 +25,8 @@
  OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
- * Changes from Qualcomm Innovation Center are provided under the following license:
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
@@ -79,7 +79,12 @@ public:
     static const C2HandleGBM* Import(
             const C2Handle *const handle,
             uint32_t *width, uint32_t *height);
-private:
+
+    struct GbmBuf {
+        int buffer_fd; // shared ion buffer
+        int meta_buffer_fd;
+    };
+
     struct ExtraData {
         uint32_t width;
         uint32_t height;
@@ -94,18 +99,26 @@ private:
         uint32_t uIdHi;
         uint32_t index;
         uint32_t magic;
+        uint32_t id;
     };
+    GbmBuf mFds;
+    ExtraData mInts;
 
     enum {
+        NUM_FDS = sizeof(mFds) / sizeof(int),
         NUM_INTS = sizeof(ExtraData) / sizeof(int),
+        VERSION = sizeof(C2Handle)
     };
 
     static constexpr uint32_t MAGIC = '\xc2gb\x00';
 
+private:
     static const ExtraData* GetExtraData(const C2Handle *const handle);
 
     static ExtraData *GetExtraData(C2Handle *const handle);
 };
+
+static_assert(offsetof(C2HandleGBM, data) == offsetof(C2HandleGBM, mFds));
 
 class C2AllocatorGBM : public C2Allocator {
 public:
