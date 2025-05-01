@@ -38,6 +38,7 @@
  * That platform-agnostic Codec 2.0 API only defines the bare minimum usages. Platforms shall define
  * usage bits that are appropriate for the platform.
  */
+#include <cstdint>
 struct C2MemoryUsage {
 // public:
     /**
