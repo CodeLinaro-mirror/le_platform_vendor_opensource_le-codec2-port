@@ -212,6 +212,12 @@ public:
     // default constructor needed because of the disabled copy constructor
     inline _C2FlexStructCheck() = default;
 
+    /// usual delete operator, needed because the class also has a placement delete operator
+    inline void operator delete(void* ptr) noexcept {
+        ::operator delete(ptr);
+    }
+
+
 protected:
     // cannot copy flexible params
     _C2FlexStructCheck(const _C2FlexStructCheck<S, ParamIndex, TypeFlags> &) = delete;
@@ -243,6 +249,11 @@ protected:
             return ::operator new(size);
         }
         return nullptr;
+    }
+
+    /// placement delete, called during placement new if constructor throws
+    inline void operator delete(void* ptr, size_t) noexcept {
+        ::operator delete(ptr);
     }
 };
 
