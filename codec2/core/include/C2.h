@@ -20,6 +20,7 @@
 #include <errno.h>
 
 #include <string>
+#include <cstdint>
 
 /** nanoseconds with arbitrary origin. */
 typedef int64_t c2_nsecs_t;

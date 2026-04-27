@@ -107,6 +107,10 @@ struct C2Config {
     enum secure_mode_t : uint32_t;          ///< secure/protected modes
     enum supplemental_info_t : uint32_t;    ///< supplemental information types
     enum tiling_mode_t : uint32_t;          ///< tiling modes
+    enum resource_kind_t : uint32_t;        ///< resource kinds
+    enum hdr_dynamic_metadata_type_t : uint32_t;  ///< HDR dynamic metadata type
+    enum hdr_format_t : uint32_t;           ///< HDR format
+
 };
 
 struct C2PlatformConfig {
@@ -132,6 +136,7 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexMasteringDisplayColorVolume,
     kParamIndexChromaOffset,
     kParamIndexGopLayer,
+    kParamIndexSystemResource,
 
     /* =================================== parameter indices =================================== */
 
@@ -191,8 +196,15 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexSecureMode,
     kParamIndexEncryptedBuffer, // info-buffer, used with SM_READ_PROTECTED_WITH_ENCRYPTED
 
+    /* resource capacity and resources excluded */
+    kParamIndexResourcesCapacity,
+    kParamIndexResourcesExcluded,
+
     // deprecated
     kParamIndexDelayRequest = kParamIndexDelay | C2Param::CoreIndex::IS_REQUEST_FLAG,
+
+    /* Region of Interest Encoding parameters */
+    kParamIndexQpOffsetMapBuffer, // info-buffer, used to signal qp-offset map for a frame
 
     /* ------------------------------------ (trans/en)coders ------------------------------------ */
 
@@ -226,6 +238,11 @@ enum C2ParamIndexKind : C2Param::type_index_t {
     kParamIndexHdr10PlusMetadata,
 
     kParamIndexPictureQuantization,
+    kParamIndexHdrDynamicMetadata,
+    kParamIndexHdrFormat,
+    kParamIndexQpOffsetRects,
+    kParamIndexQpOffsetRect,
+
 
     /* ------------------------------------ video components ------------------------------------ */
 
@@ -304,6 +321,10 @@ enum C2ParamIndexKind : C2Param::type_index_t {
 
     // encoding quality requirements
     kParamIndexEncodingQualityLevel, // encoders, enum
+
+    // encoding statistics, average block qp of a frame
+    kParamIndexAverageBlockQuantization, // int32
+
 };
 
 }
@@ -341,6 +362,7 @@ C2ENUM(C2Config::api_feature_t, uint64_t,
 
     API_SAME_INPUT_BUFFER = (1U << 16),   ///< supporting multiple input buffers
                                           ///< backed by the same allocation
+    API_BLOCK_FENCES     = (1U << 17),    ///< supporting block fences
 
     API_STREAMS          = (1ULL << 32),  ///< supporting variable number of streams
 
@@ -441,6 +463,7 @@ enum : uint32_t {
     _C2_PL_AV1_BASE  = 0x9000,
     _C2_PL_VP8_BASE  = 0xA000,
     _C2_PL_MPEGH_BASE = 0xB000,     // MPEG-H 3D Audio
+    _C2_PL_APV_BASE = 0xC000,     // APV
 
     C2_PROFILE_LEVEL_VENDOR_START = 0x70000000,
 };
@@ -608,6 +631,16 @@ enum C2Config::profile_t : uint32_t {
     PROFILE_MPEGH_HIGH,                         ///< MPEG-H High
     PROFILE_MPEGH_LC,                           ///< MPEG-H Low-complexity
     PROFILE_MPEGH_BASELINE,                     ///< MPEG-H Baseline
+
+    // Advanced Professional VideoCodec (APV)
+    PROFILE_APV_422_10 = _C2_PL_APV_BASE,       ///< APV 422-10 Profile
+    PROFILE_APV_422_12,                         ///< APV 422-12 Profile
+    PROFILE_APV_444_10,                         ///< APV 444-10 Profile
+    PROFILE_APV_444_12,                         ///< APV 444-12 Profile
+    PROFILE_APV_4444_10,                        ///< APV 4444-10 Profile
+    PROFILE_APV_4444_12,                        ///< APV 4444-12 Profile
+    PROFILE_APV_400_10,                         ///< APV 400-10 Profile
+
 };
 
 enum C2Config::level_t : uint32_t {
@@ -714,6 +747,9 @@ enum C2Config::level_t : uint32_t {
     LEVEL_DV_MAIN_UHD_30,                       ///< Dolby Vision main tier uhd30
     LEVEL_DV_MAIN_UHD_48,                       ///< Dolby Vision main tier uhd48
     LEVEL_DV_MAIN_UHD_60,                       ///< Dolby Vision main tier uhd60
+    LEVEL_DV_MAIN_UHD_120,                      ///< Dolby Vision main tier uhd120
+    LEVEL_DV_MAIN_8K_30,                        ///< Dolby Vision main tier 8k30
+    LEVEL_DV_MAIN_8K_60,                        ///< Dolby Vision main tier 8k60
 
     LEVEL_DV_HIGH_HD_24 = _C2_PL_DV_BASE + 0x100,  ///< Dolby Vision high tier hd24
     LEVEL_DV_HIGH_HD_30,                        ///< Dolby Vision high tier hd30
@@ -724,6 +760,9 @@ enum C2Config::level_t : uint32_t {
     LEVEL_DV_HIGH_UHD_30,                       ///< Dolby Vision high tier uhd30
     LEVEL_DV_HIGH_UHD_48,                       ///< Dolby Vision high tier uhd48
     LEVEL_DV_HIGH_UHD_60,                       ///< Dolby Vision high tier uhd60
+    LEVEL_DV_HIGH_UHD_120,                      ///< Dolby Vision high tier uhd120
+    LEVEL_DV_HIGH_8K_30,                        ///< Dolby Vision high tier 8k30
+    LEVEL_DV_HIGH_8K_60,                        ///< Dolby Vision high tier 8k60
 
     // AV1 levels
     LEVEL_AV1_2    = _C2_PL_AV1_BASE ,          ///< AV1 Level 2
@@ -757,6 +796,68 @@ enum C2Config::level_t : uint32_t {
     LEVEL_MPEGH_3,                              ///< MPEG-H L3
     LEVEL_MPEGH_4,                              ///< MPEG-H L4
     LEVEL_MPEGH_5,                              ///< MPEG-H L5
+
+    // Advanced Professional VideoCodec(APV) levels/bands
+    LEVEL_APV_1_BAND_0 = _C2_PL_APV_BASE,            ///< APV L 1, BAND 0
+    LEVEL_APV_1_1_BAND_0,                            ///< APV L 1.1, BAND 0
+    LEVEL_APV_2_BAND_0,                              ///< APV L 2, BAND 0
+    LEVEL_APV_2_1_BAND_0,                            ///< APV L 2.1, BAND 0
+    LEVEL_APV_3_BAND_0,                              ///< APV L 3, BAND 0
+    LEVEL_APV_3_1_BAND_0,                            ///< APV L 3.1, BAND 0
+    LEVEL_APV_4_BAND_0,                              ///< APV L 4, BAND 0
+    LEVEL_APV_4_1_BAND_0,                            ///< APV L 4.1, BAND 0
+    LEVEL_APV_5_BAND_0,                              ///< APV L 5, BAND 0
+    LEVEL_APV_5_1_BAND_0,                            ///< APV L 5.1, BAND 0
+    LEVEL_APV_6_BAND_0,                              ///< APV L 6, BAND 0
+    LEVEL_APV_6_1_BAND_0,                            ///< APV L 6.1, BAND 0
+    LEVEL_APV_7_BAND_0,                              ///< APV L 7, BAND 0
+    LEVEL_APV_7_1_BAND_0,                            ///< APV L 7.1, BAND 0
+
+    LEVEL_APV_1_BAND_1 = _C2_PL_APV_BASE + 0x100,    ///< APV L 1, BAND 1
+    LEVEL_APV_1_1_BAND_1,                            ///< APV L 1.1, BAND 1
+    LEVEL_APV_2_BAND_1,                              ///< APV L 2, BAND 1
+    LEVEL_APV_2_1_BAND_1,                            ///< APV L 2.1, BAND 1
+    LEVEL_APV_3_BAND_1,                              ///< APV L 3, BAND 1
+    LEVEL_APV_3_1_BAND_1,                            ///< APV L 3.1, BAND 1
+    LEVEL_APV_4_BAND_1,                              ///< APV L 4, BAND 1
+    LEVEL_APV_4_1_BAND_1,                            ///< APV L 4.1, BAND 1
+    LEVEL_APV_5_BAND_1,                              ///< APV L 5, BAND 1
+    LEVEL_APV_5_1_BAND_1,                            ///< APV L 5.1, BAND 1
+    LEVEL_APV_6_BAND_1,                              ///< APV L 6, BAND 1
+    LEVEL_APV_6_1_BAND_1,                            ///< APV L 6.1, BAND 1
+    LEVEL_APV_7_BAND_1,                              ///< APV L 7, BAND 1
+    LEVEL_APV_7_1_BAND_1,                            ///< APV L 7.1, BAND 1
+
+    LEVEL_APV_1_BAND_2 = _C2_PL_APV_BASE + 0x200,    ///< APV L 1, BAND 2
+    LEVEL_APV_1_1_BAND_2,                            ///< APV L 1.1, BAND 2
+    LEVEL_APV_2_BAND_2,                              ///< APV L 2, BAND 2
+    LEVEL_APV_2_1_BAND_2,                            ///< APV L 2.1, BAND 2
+    LEVEL_APV_3_BAND_2,                              ///< APV L 3, BAND 2
+    LEVEL_APV_3_1_BAND_2,                            ///< APV L 3.1, BAND 2
+    LEVEL_APV_4_BAND_2,                              ///< APV L 4, BAND 2
+    LEVEL_APV_4_1_BAND_2,                            ///< APV L 4.1, BAND 2
+    LEVEL_APV_5_BAND_2,                              ///< APV L 5, BAND 2
+    LEVEL_APV_5_1_BAND_2,                            ///< APV L 5.1, BAND 2
+    LEVEL_APV_6_BAND_2,                              ///< APV L 6, BAND 2
+    LEVEL_APV_6_1_BAND_2,                            ///< APV L 6.1, BAND 2
+    LEVEL_APV_7_BAND_2,                              ///< APV L 7, BAND 2
+    LEVEL_APV_7_1_BAND_2,                            ///< APV L 7.1, BAND 2
+
+    LEVEL_APV_1_BAND_3 = _C2_PL_APV_BASE + 0x300,    ///< APV L 1, BAND 3
+    LEVEL_APV_1_1_BAND_3,                            ///< APV L 1.1, BAND 3
+    LEVEL_APV_2_BAND_3,                              ///< APV L 2, BAND 3
+    LEVEL_APV_2_1_BAND_3,                            ///< APV L 2.1, BAND 3
+    LEVEL_APV_3_BAND_3,                              ///< APV L 3, BAND 3
+    LEVEL_APV_3_1_BAND_3,                            ///< APV L 3.1, BAND 3
+    LEVEL_APV_4_BAND_3,                              ///< APV L 4, BAND 3
+    LEVEL_APV_4_1_BAND_3,                            ///< APV L 4.1, BAND 3
+    LEVEL_APV_5_BAND_3,                              ///< APV L 5, BAND 3
+    LEVEL_APV_5_1_BAND_3,                            ///< APV L 5.1, BAND 3
+    LEVEL_APV_6_BAND_3,                              ///< APV L 6, BAND 3
+    LEVEL_APV_6_1_BAND_3,                            ///< APV L 6.1, BAND 3
+    LEVEL_APV_7_BAND_3,                              ///< APV L 7, BAND 3
+    LEVEL_APV_7_1_BAND_3,                            ///< APV L 7.1, BAND 3
+
 };
 
 struct C2ProfileLevelStruct {
@@ -1208,6 +1309,90 @@ typedef C2GlobalParam<C2Tuning, C2Int32Value, kParamIndexRealTimePriority>
         C2RealTimePriorityTuning;
 constexpr char C2_PARAMKEY_PRIORITY[] = "algo.priority";
 
+/**
+ * Resource kind.
+ */
+C2ENUM(C2Config::resource_kind_t, uint32_t,
+    CONST,
+    PER_FRAME,
+    PER_INPUT_BLOCK,
+    PER_OUTPUT_BLOCK
+)
+
+/**
+ * Definition of a system resource use.
+ *
+ * [PROPOSED]
+ *
+ * System resources are defined by the default component store.
+ * They represent any physical or abstract entities of limited availability
+ * that is required for a component instance to execute and process work.
+ *
+ * Each defined resource has an id. In general, the id is defined by the vendor,
+ * but the platform also defines a limited set of IDs. Vendor IDs SHALL start
+ * from C2PlatformConfig::resource_id_t::VENDOR_START.
+ *
+ * The use of a resource is specified by the amount and the kind (e.g. whether the amount
+ * of resources is required for each frame processed, or whether they are required
+ * regardless of the processing rate (const amount)).
+ *
+ * Note: implementations can shadow this structure with their own custom resource
+ * structure where a uint32_t based enum is used for id.
+ * This can be used to provide a name for each resource, via parameter descriptors.
+ */
+
+struct C2SystemResourceStruct {
+    C2SystemResourceStruct(uint32_t id_,
+                           C2Config::resource_kind_t kind_,
+                           uint64_t amount_)
+        : id(id_), kind(kind_), amount(amount_) { }
+    C2SystemResourceStruct() : C2SystemResourceStruct(0, CONST, 0) {}
+    uint32_t id;            ///< resource ID (see C2PlatformConfig::resource_id_t)
+    C2Config::resource_kind_t kind;
+    uint64_t amount;
+
+    DEFINE_AND_DESCRIBE_C2STRUCT(SystemResource)
+    C2FIELD(id, "id")
+    C2FIELD(kind, "kind")
+    C2FIELD(amount, "amount")
+};
+
+/**
+ * Total system resource capacity.
+ *
+ * [PROPOSED]
+ *
+ * This setting is implemented by the default component store.
+ * The total resource capacity is specified as the maximum amount for each resource ID
+ * that is supported by the device hardware or firmware.
+ * As such, the kind must be CONST for each element.
+ */
+typedef C2GlobalParam<C2Tuning,
+                      C2SimpleArrayStruct<C2SystemResourceStruct>,
+                      kParamIndexResourcesCapacity> C2ResourcesCapacityTuning;
+constexpr char C2_PARAMKEY_RESOURCES_CAPACITY[] = "resources.capacity";
+
+/**
+ * Excluded system resources.
+ *
+ * [PROPOSED]
+ *
+ * This setting is implemented by the default component store.
+ * Some system resources may be used by components and not tracked by the Codec 2.0 API.
+ * This is communicated by this tuning.
+ * Excluded resources are the total resources that are used by non-Codec 2.0 components.
+ * It is specified as the excluded amount for each resource ID that is used by
+ * a non-Codec 2.0 component. As such, the kind must be CONST for each element.
+ *
+ * The platform can calculate the available resources as total capacity minus
+ * excluded resource minus sum of needed resources for each component.
+ */
+typedef C2GlobalParam<C2Tuning,
+                      C2SimpleArrayStruct<C2SystemResourceStruct>,
+                      kParamIndexResourcesExcluded> C2ResourcesExcludedTuning;
+constexpr char C2_PARAMKEY_RESOURCES_EXCLUDED[] = "resources.excluded";
+
+
 /* ------------------------------------- protected content ------------------------------------- */
 
 /**
@@ -1404,6 +1589,48 @@ constexpr char C2_PARAMKEY_SCALED_PICTURE_SIZE[] = "raw.scaled-size";
 typedef C2StreamParam<C2Tuning, C2RectStruct, kParamIndexScaledCropRect>
         C2StreamScaledCropRectTuning;
 constexpr char C2_PARAMKEY_SCALED_CROP_RECT[] = "raw.scaled-crop";
+/**
+ * Region of Interest of an image/video frame communicated as an array of C2QpOffsetRectStruct
+ *
+ * Fields width, height, left and top of C2QpOffsetRectStruct form a bounding box contouring RoI.
+ * Field qpOffset of C2QpOffsetRectStruct indicates the qp bias to be used for quantizing the
+ * coding units of the bounding box.
+ *
+ * If Roi rect is not valid that is bounding box width is < 0 or bounding box height is < 0,
+ * components may ignore the configuration silently. If Roi rect extends outside frame
+ * boundaries, then rect shall be clamped to the frame boundaries.
+ *
+ * The scope of this key is throughout the encoding session until it is reconfigured with a
+ * different value.
+ *
+ * The number of elements in C2StreamQpOffset array is not limited by C2 specification.
+ * However components may mandate a limit. Implementations may drop the rectangles that are beyond
+ * the supported limits. Hence it is preferable to place the rects in descending order of
+ * importance. Transitively, if the bounding boxes overlap, then the most preferred
+ * rectangle's qp offset (earlier rectangle qp offset) will be used to quantize the block.
+ */
+struct C2QpOffsetRectStruct : C2Rect {
+    C2QpOffsetRectStruct() = default;
+    C2QpOffsetRectStruct(const C2Rect &rect, int32_t offset) : C2Rect(rect), qpOffset(offset) {}
+
+    bool operator==(const C2QpOffsetRectStruct &) = delete;
+    bool operator!=(const C2QpOffsetRectStruct &) = delete;
+
+    int32_t qpOffset;
+
+    DEFINE_AND_DESCRIBE_C2STRUCT(QpOffsetRect)
+    C2FIELD(width, "width")
+    C2FIELD(height, "height")
+    C2FIELD(left, "left")
+    C2FIELD(top, "top")
+    C2FIELD(qpOffset, "qp-offset")
+};
+
+typedef C2StreamParam<C2Info, C2SimpleArrayStruct<C2QpOffsetRectStruct>, kParamIndexQpOffsetRects>
+        C2StreamQpOffsetRects;
+constexpr char C2_PARAMKEY_QP_OFFSET_RECTS[] = "coding.qp-offset-rects";
+
+
 
 /* ------------------------------------- color information ------------------------------------- */
 
@@ -1646,6 +1873,69 @@ typedef C2StreamParam<C2Info, C2BlobValue, kParamIndexHdr10PlusMetadata>
         C2StreamHdr10PlusInfo;
 constexpr char C2_PARAMKEY_INPUT_HDR10_PLUS_INFO[] = "input.hdr10-plus-info";
 constexpr char C2_PARAMKEY_OUTPUT_HDR10_PLUS_INFO[] = "output.hdr10-plus-info";
+
+/**
+ * HDR dynamic metadata types
+ */
+C2ENUM(C2Config::hdr_dynamic_metadata_type_t, uint32_t,
+    HDR_DYNAMIC_METADATA_TYPE_SMPTE_2094_10,  ///< SMPTE ST 2094-10
+    HDR_DYNAMIC_METADATA_TYPE_SMPTE_2094_40,  ///< SMPTE ST 2094-40
+)
+
+struct C2HdrDynamicMetadataStruct {
+    inline C2HdrDynamicMetadataStruct() { memset(this, 0, sizeof(*this)); }
+
+    inline C2HdrDynamicMetadataStruct(
+            size_t flexCount, C2Config::hdr_dynamic_metadata_type_t type)
+        : type_(type) {
+        memset(data, 0, flexCount);
+    }
+
+    C2Config::hdr_dynamic_metadata_type_t type_;
+    uint8_t data[];
+
+    DEFINE_AND_DESCRIBE_FLEX_C2STRUCT(HdrDynamicMetadata, data)
+    C2FIELD(type_, "type")
+    C2FIELD(data, "data")
+};
+
+/**
+ * Dynamic HDR Metadata Info.
+ */
+typedef C2StreamParam<C2Info, C2HdrDynamicMetadataStruct, kParamIndexHdrDynamicMetadata>
+       C2StreamHdrDynamicMetadataInfo;
+constexpr char C2_PARAMKEY_INPUT_HDR_DYNAMIC_INFO[] = "input.hdr-dynamic-info";
+constexpr char C2_PARAMKEY_OUTPUT_HDR_DYNAMIC_INFO[] = "output.hdr-dynamic-info";
+
+/**
+ * HDR Format
+ */
+C2ENUM(C2Config::hdr_format_t, uint32_t,
+    UNKNOWN,     ///< HDR format not known (default)
+    SDR,         ///< not HDR (SDR)
+    HLG,         ///< HLG
+    HDR10,       ///< HDR10
+    HDR10_PLUS,  ///< HDR10+
+);
+
+/**
+ * HDR Format Info
+ *
+ * This information may be present during configuration to allow encoders to
+ * prepare encoding certain HDR formats. When this information is not present
+ * before start, encoders should determine the HDR format based on the available
+ * HDR metadata on the first input frame.
+ *
+ * While this information is optional, it is not a hint. When present, encoders
+ * that do not support dynamic reconfiguration do not need to switch to the HDR
+ * format based on the metadata on the first input frame.
+ */
+typedef C2StreamParam<C2Info, C2SimpleValueStruct<C2EasyEnum<C2Config::hdr_format_t>>,
+                kParamIndexHdrFormat>
+        C2StreamHdrFormatInfo;
+constexpr char C2_PARAMKEY_HDR_FORMAT[] = "coded.hdr-format";
+
+
 
 /* ------------------------------------ block-based coding ----------------------------------- */
 
@@ -2444,6 +2734,19 @@ C2ENUM(C2PlatformConfig::encoding_quality_level_t, uint32_t,
     NONE = 0,
     S_HANDHELD = 1              // corresponds to VMAF=70
 );
+
+
+/**
+ * Video Encoding Statistics Export
+ */
+
+/**
+ * Average block QP exported from video encoder.
+ */
+typedef C2StreamParam<C2Info, C2SimpleValueStruct<int32_t>, kParamIndexAverageBlockQuantization>
+        C2AndroidStreamAverageBlockQuantizationInfo;
+constexpr char C2_PARAMKEY_AVERAGE_QP[] = "coded.average-qp";
+
 
 /// @}
 
