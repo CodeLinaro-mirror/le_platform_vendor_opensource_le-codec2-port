@@ -563,7 +563,7 @@ public:
                 C2R result = fn(mayBlock, oldValue, helper, factory.get(deps)...);
 
                 // If value changed, copy result to current value
-                if (helper.get() != *typedParam->get()) {
+                if (static_cast<const C2Param &>(helper.get()) != static_cast<const C2Param &>(*typedParam->get())) {
                     *typedParam = proposedValue;
                     *changed = true;
                 }

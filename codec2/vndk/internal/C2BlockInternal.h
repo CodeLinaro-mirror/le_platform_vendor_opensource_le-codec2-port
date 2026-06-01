@@ -101,6 +101,19 @@ struct _C2BlockFactory {
     std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
             const std::shared_ptr<C2GraphicAllocation> &alloc,
             std::function<void()> deleter);
+    /**
+     * Create a graphic block from the received native handle.
+     *
+     * \param handle    native handle to a graphic block
+     *
+     * \return shared pointer to the graphic block. nullptr if there was not enough memory to
+     *         create this block.
+     */
+    static
+    std::shared_ptr<C2GraphicBlock> CreateGraphicBlock(
+            const C2Handle *handle);
+
+
 };
 #endif // ANDROID_STAGEFRIGHT_C2BLOCK_INTERNAL_H_
 

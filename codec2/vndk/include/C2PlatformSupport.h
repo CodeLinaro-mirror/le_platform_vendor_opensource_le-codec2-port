@@ -55,6 +55,15 @@ public:
          * to create a C2Handle from a gbm handle - for C2Allocator::priorAllocation.
          */
         GBMBUFHEAP,
+  /**
+         * ID of the bufferqueue backed platform allocator.
+         *
+         * C2Handle layout is not public. Use C2AllocatorGralloc::UnwrapNativeCodec2GrallocHandle
+         * to get the underlying handle from a C2Handle, and WrapNativeCodec2GrallocHandle
+         * to create a C2Handle from a handle - for C2Allocator::priorAllocation.
+         */
+        BUFFERQUEUE,
+
 
         /**
          * ID of indicating the end of platform allocator definition.

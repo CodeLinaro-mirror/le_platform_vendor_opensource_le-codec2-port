@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 pkg_check_modules(LIBDMABUFHEAP libdmabufheap)
 
 # TODO add -Werror
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-error=deprecated-declarations -Wno-enum-compare -stdlib=libstdc++ \
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-error=deprecated-declarations -Wno-enum-compare -stdlib=libstdc++ -fno-sized-deallocation \
     -Wl --no-undefined \
     -I/usr/include/drm \
     -I/usr/include/c++/ \
@@ -48,14 +48,16 @@ set(CODEC2_VNDK_SOURCE
     vndk/C2Config.cpp
     vndk/C2DmaBufAllocator.cpp
     vndk/C2Store.cpp
+    vndk/C2Fence.cpp
     vndk/util/C2Debug.cpp
     vndk/util/C2InterfaceHelper.cpp
     vndk/util/C2InterfaceUtils.cpp
     vndk/util/C2ParamUtils.cpp
+    vndk/platform/C2SurfaceSyncObj.cpp
 #C2 platform vndk implementation
     vndk_platform/C2AllocatorGBM.cpp)
 add_library(codec2_vndk SHARED ${CODEC2_VNDK_SOURCE})
-target_link_libraries(codec2_vndk gbm dmabufheap dl log cutils)
+target_link_libraries(codec2_vndk gbm dmabufheap dl log cutils utils ui)
 target_compile_options(codec2_vndk PRIVATE -Wno-sign-conversion -fno-c++-static-destructors)
 
 set(CODEC2_VNDK_LIBS
