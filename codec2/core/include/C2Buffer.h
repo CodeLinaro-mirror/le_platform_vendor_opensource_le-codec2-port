@@ -110,14 +110,6 @@ public:
      */
     bool isHW() const;
 
-     /**
-      * Returns a native handle that can be used to send this fence
-      * \note The returned handle, if valid, must be closed and deleted by the caller.
-      *
-      * \return a native handle representing this fence, or nullptr if this fence cannot be marshalled.
-      */
-     C2Handle *handle() const;
-
     /**
      * Null-fence. A fence that has fired.
      */
@@ -128,7 +120,6 @@ private:
     std::shared_ptr<Impl> mImpl;
     C2Fence(std::shared_ptr<Impl> impl);
     friend struct _C2FenceFactory;
-    friend std::vector<int> ExtractFdsFromCodec2SyncFence(const C2Fence& fence);
 };
 
 /// \addtogroup buf_internal Internal
