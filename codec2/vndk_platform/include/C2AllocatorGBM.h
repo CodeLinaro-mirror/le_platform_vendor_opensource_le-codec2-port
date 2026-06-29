@@ -39,36 +39,6 @@
 
 #include <list>
 
-// Linux platform buffer/memory usage bits.
-// The upper 32 bits is gbm usage. The lower 32 bits is C2 usage.
-struct C2MemoryUsageGBM : public C2MemoryUsage {
-    C2MemoryUsageGBM(const C2MemoryUsage &usage, uint32_t gbmUsage)
-        : C2MemoryUsage(usage) {
-        expected = ((uint64_t)gbmUsage << 32) + usage.expected;
-    }
-    C2MemoryUsageGBM(const C2MemoryUsage &usage)
-        : C2MemoryUsage(usage) {
-    }
-    C2MemoryUsageGBM(uint64_t expected_)
-        : C2MemoryUsage(expected_) {
-    }
-    // Get GBM usage bits from overall usage
-    uint32_t gbmUsage() {
-        uint32_t gbmUsage = 0;
-        if (expected & C2MemoryUsage::READ_PROTECTED) {
-            gbmUsage |= GBM_BO_USAGE_PROTECTED_QTI;
-        }
-        gbmUsage |= (uint32_t)(expected >> 32);
-        return gbmUsage;
-    }
-    // Get C2 usage bits from overall uasge
-    uint64_t c2Usage() {
-        // the C2 usage is stored in lower 32-bit
-        return expected & 0xFFFFFFFF;
-    }
-};
-
-
 namespace android {
 
 class C2HandleGBM : public C2Handle {
@@ -130,8 +100,6 @@ public:
         uint32_t index;
         uint32_t magic;
         uint32_t id;
-	uint32_t boHi;
-	uint32_t boLo;
     };
     GbmBuf mFds;
     ExtraData mInts;
@@ -178,9 +146,6 @@ public:
     virtual bool checkHandle(const C2Handle* const o) const override { return CheckHandle(o); }
 
     static bool CheckHandle(const C2Handle* const o);
-
-    c2_status_t createC2HandleGBM(C2Handle *&handle, uint32_t width, uint32_t height,
-                                  uint32_t format, uint32_t usage);
 
 private:
     class Impl;

@@ -17,8 +17,6 @@
 #ifndef C2BUFFER_BASE_H_
 #define C2BUFFER_BASE_H_
 
-#include <cstdint>
-
 /// \defgroup allocator Allocation and memory placement
 /// @{
 
