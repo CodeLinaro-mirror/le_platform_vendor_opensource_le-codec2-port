@@ -459,15 +459,6 @@ public:
         mAllocationIndex = 0;
     }
 
-    uint32_t toGBMUsage(uint64_t flags) {
-        uint32_t usage = 0;
-        usage |= flags & C2MemoryUsage::CPU_READ ? GBM_BO_USAGE_CPU_READ_QTI : 0;
-        usage |= flags & C2MemoryUsage::READ_PROTECTED ? GBM_BO_USAGE_PROTECTED_QTI : 0;
-        usage |= flags & C2MemoryUsage::CPU_WRITE ? GBM_BO_USAGE_CPU_WRITE_QTI : 0;
-        usage |= flags & C2MemoryUsage:: WRITE_PROTECTED ? GBM_BO_USAGE_PROTECTED_QTI : 0;
-        return usage;
-    }
-
     c2_status_t allocateRawHandle_l(
         uint32_t width, uint32_t height,
         uint32_t format, uint64_t flags,
@@ -480,12 +471,10 @@ public:
         *bufferObj = nullptr;
         *handle = nullptr;
 
-        uint32_t usage = toGBMUsage(flags);
-        bo = gbm_bo_create(mGBM, width, height, format, usage);
-
+        bo = gbm_bo_create(mGBM, width, height, format, flags);
         if (bo == nullptr) {
-            ALOGE("%s: failed. width %u, height %u, format %#x, usage %#x\n",
-                __func__, width, height, format, usage);
+            ALOGE("%s: failed. width %u, height %u, format %#x, flags %#zx\n",
+                __func__, width, height, format, flags);
             return C2_CORRUPTED;
         }
 
@@ -575,26 +564,8 @@ public:
             gbmHandle->data[7], gbmHandle->data[8], gbmHandle->data[9], (gbmHandle->data[10] |
             ((uint64_t)gbmHandle->data[11] << 32)), gbmHandle->data[12]);
 
-        auto flags = C2HandleGBM::usage(cHandle);
-        uint32_t format = C2HandleGBM::format(cHandle);
-        uint32_t usage = toGBMUsage(flags);
-
-        struct gbm_buf_info buffer_info = {
-                C2HandleGBM::bufferFd(cHandle),
-                C2HandleGBM::metaFd(cHandle),
-                width,
-                height,
-                format
-        };
-        auto bufferObj = gbm_bo_import(mGBM, GBM_BO_IMPORT_GBM_BUF_TYPE, &buffer_info, usage);
-        if (bufferObj == nullptr) {
-            ALOGE("%s: failed. width %u, height %u, format %#x, usage %#x\n",
-                  __func__, width, height, format, usage);
-            return C2_CORRUPTED;
-        }
-
         allocation->reset(new C2AllocationGBM(
-                width, height, bufferObj, gbmHandle, mTraits->id));
+                width, height, nullptr, gbmHandle, mTraits->id));
         return C2_OK;
     }
 
